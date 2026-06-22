@@ -1,0 +1,83 @@
+{
+  "name": "atp-manager-desktop",
+  "productName": "ATP Manager",
+  "version": "4.0.0",
+  "description": "Assistente de Automatização de Tramitação Processual — Agente local com interface gráfica",
+  "author": {
+    "name": "Flávio Fernandes Pacetta",
+    "email": "fpacetta@tjsp.jus.br"
+  },
+  "license": "MIT",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "postinstall": "playwright install chromium"
+  },
+  "dependencies": {
+    "playwright-core": "^1.49.0",
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "br.jus.tjsp.atpmanager",
+    "productName": "ATP Manager",
+    "copyright": "Copyright © 2026 Flávio Fernandes Pacetta",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "node_modules/**/*",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "ms-playwright",
+        "to": "ms-playwright",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "ATP-Manager-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ATP Manager",
+      "installerLanguages": ["pt_BR"],
+      "language": "1046"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.productivity",
+      "artifactName": "ATP-Manager-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.png",
+      "category": "Office",
+      "artifactName": "ATP-Manager-${version}.${ext}"
+    }
+  }
+}

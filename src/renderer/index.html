@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ATP Manager</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- ===================== ASSISTENTE DE PRIMEIRO USO ===================== -->
+    <div class="onboarding" id="onboarding" hidden>
+      <div class="ob-card">
+        <div class="ob-progress">
+          <span class="ob-dot active" data-step="0"></span>
+          <span class="ob-dot" data-step="1"></span>
+          <span class="ob-dot" data-step="2"></span>
+          <span class="ob-dot" data-step="3"></span>
+        </div>
+
+        <!-- Passo 0: Boas-vindas -->
+        <div class="ob-step active" data-step="0">
+          <div class="ob-mark">ATP</div>
+          <h2>Bem-vindo ao ATP Manager</h2>
+          <p>
+            Este programa faz, sozinho, a verificação e tramitação de processos
+            no eproc nos horários que você escolher. Vamos configurar em 3
+            passos rápidos.
+          </p>
+          <button class="btn primary lg ob-next">Começar</button>
+        </div>
+
+        <!-- Passo 1: Código de acesso -->
+        <div class="ob-step" data-step="1">
+          <div class="ob-step-label">Passo 1 de 3</div>
+          <h2>Conectar à sua conta</h2>
+          <p>
+            Abra o painel do ATP Manager no navegador, vá em
+            <strong>Integração eproc</strong> e copie o
+            <strong>código de acesso</strong> do agente. Cole abaixo.
+          </p>
+          <label class="field">
+            <span>Endereço do painel</span>
+            <input type="text" id="obServerUrl" placeholder="https://..." />
+          </label>
+          <label class="field">
+            <span>Código de acesso</span>
+            <input
+              type="password"
+              id="obToken"
+              placeholder="Cole aqui o código"
+            />
+          </label>
+          <div class="inline-actions">
+            <button class="btn" id="obTestToken">Testar conexão</button>
+            <span class="inline-status" id="obTokenStatus"></span>
+          </div>
+          <button class="btn primary lg ob-next" id="obStep1Next" disabled>
+            Continuar
+          </button>
+          <button class="btn ghost ob-skip">Pular por agora</button>
+        </div>
+
+        <!-- Passo 2: Acesso ao eproc -->
+        <div class="ob-step" data-step="2">
+          <div class="ob-step-label">Passo 2 de 3</div>
+          <h2>Acesso ao eproc</h2>
+          <p>
+            Informe seu usuário e senha do eproc. Eles ficam guardados de forma
+            protegida só neste computador e servem para o programa entrar
+            sozinho.
+          </p>
+          <label class="field">
+            <span>Usuário do eproc</span>
+            <input type="text" id="obEprocUser" placeholder="Ex: M123456" />
+          </label>
+          <label class="field">
+            <span>Senha do eproc</span>
+            <input
+              type="password"
+              id="obEprocPass"
+              placeholder="Sua senha do eproc"
+            />
+          </label>
+          <button class="btn primary lg ob-next">Continuar</button>
+          <button class="btn ghost ob-skip">Pular por agora</button>
+        </div>
+
+        <!-- Passo 3: Concluído -->
+        <div class="ob-step" data-step="3">
+          <div class="ob-check">✓</div>
+          <h2>Tudo pronto!</h2>
+          <p>
+            O programa já vai funcionar nos horários padrão (dias úteis às
+            09:00, 10:00 e 14:00, com renovação às 08:00). Você pode mudar isso
+            a qualquer momento na aba <strong>Configuração</strong>.
+          </p>
+          <button class="btn primary lg" id="obFinish">
+            Ir para o programa
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="app">
+      <!-- Barra lateral -->
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">ATP</div>
+          <div class="brand-text">
+            <strong>ATP Manager</strong>
+            <span>Automatização de Tramitação</span>
+          </div>
+        </div>
+
+        <nav class="nav">
+          <button class="nav-item active" data-tab="inicio">
+            <span class="nav-ico">●</span> Início
+          </button>
+          <button class="nav-item" data-tab="config">
+            <span class="nav-ico">●</span> Configuração
+          </button>
+          <button class="nav-item" data-tab="historico">
+            <span class="nav-ico">●</span> Histórico
+          </button>
+          <button class="nav-item" data-tab="diagnostico">
+            <span class="nav-ico">●</span> Diagnóstico
+          </button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="status-pill" id="statusPill">
+            <span class="dot" id="statusDot"></span>
+            <span id="statusText">Carregando...</span>
+          </div>
+          <div class="version" id="versionLabel">v4.0.0</div>
+        </div>
+      </aside>
+
+      <!-- Conteúdo -->
+      <main class="content">
+        <!-- ===================== INÍCIO ===================== -->
+        <section class="tab active" data-tab="inicio">
+          <header class="page-head">
+            <h1>Início</h1>
+            <p>Visão geral e execução manual da verificação.</p>
+          </header>
+
+          <div class="health" id="healthBanner">
+            <div class="health-ico" id="healthIco">●</div>
+            <div class="health-text">
+              <strong id="healthTitle">Verificando…</strong>
+              <span id="healthSub">Conferindo se está tudo pronto.</span>
+            </div>
+            <button class="btn" id="healthAction" hidden>Configurar</button>
+          </div>
+
+          <div class="cards">
+            <div class="card big">
+              <div class="card-label">Verificação automática</div>
+              <div class="card-value" id="autoSummary">—</div>
+              <div class="card-sub" id="autoSub">
+                Configure os horários na aba Configuração.
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-label">Última execução</div>
+              <div class="card-value" id="lastRun">Nunca</div>
+              <div class="card-sub" id="lastRunResult"></div>
+            </div>
+          </div>
+
+          <div class="action-row">
+            <button class="btn primary lg" id="btnRunNow">
+              Executar verificação agora
+            </button>
+            <button class="btn ghost lg" id="btnDryRun">
+              Testar sem alterar
+            </button>
+            <button class="btn ghost lg" id="btnKeepalive">
+              Renovar sessão
+            </button>
+          </div>
+          <p class="action-hint">
+            “Testar sem alterar” percorre todo o processo e mostra o que seria
+            feito, <strong>sem modificar nenhum processo no eproc</strong>.
+            Ideal para conferir antes de rodar de verdade.
+          </p>
+
+          <div class="live-log" id="liveLog">
+            <div class="live-log-head">Atividade ao vivo</div>
+            <div class="live-log-body" id="liveLogBody">
+              <div class="log-empty">
+                Nenhuma atividade ainda. Clique em “Executar verificação agora”
+                para começar.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== CONFIGURAÇÃO ===================== -->
+        <section class="tab" data-tab="config">
+          <header class="page-head">
+            <h1>Configuração</h1>
+            <p>Preencha uma vez. O programa cuida do resto sozinho.</p>
+          </header>
+
+          <!-- Passo 1: Conexão -->
+          <div class="step-card">
+            <div class="step-head">
+              <span class="step-num">1</span> Conectar ao painel
+            </div>
+            <p class="step-desc">
+              Cole aqui o código de acesso que aparece no seu painel ATP
+              Manager, na página “Integração eproc”. É o que liga este programa
+              à sua conta.
+            </p>
+            <label class="field">
+              <span>Endereço do painel</span>
+              <input type="text" id="serverUrl" placeholder="https://..." />
+            </label>
+            <label class="field">
+              <span>Código de acesso</span>
+              <input
+                type="password"
+                id="token"
+                placeholder="Cole aqui o código"
+              />
+            </label>
+            <div class="inline-actions">
+              <button class="btn" id="btnTestToken">Testar conexão</button>
+              <span class="inline-status" id="tokenStatus"></span>
+            </div>
+          </div>
+
+          <!-- Passo 2: Login eproc -->
+          <div class="step-card">
+            <div class="step-head">
+              <span class="step-num">2</span> Acesso ao eproc
+            </div>
+            <p class="step-desc">
+              Seu usuário e senha do eproc. Ficam guardados de forma protegida
+              apenas neste computador — servem para o programa entrar sozinho no
+              sistema.
+            </p>
+            <label class="field">
+              <span>Usuário do eproc</span>
+              <input type="text" id="eprocUsername" placeholder="Ex: M123456" />
+            </label>
+            <label class="field">
+              <span>Senha do eproc</span>
+              <input
+                type="password"
+                id="eprocPassword"
+                placeholder="Deixe em branco para manter a atual"
+              />
+            </label>
+            <label class="field">
+              <span>Endereço do eproc</span>
+              <input
+                type="text"
+                id="eprocUrl"
+                placeholder="https://eproc1g.tjsp.jus.br/eproc/"
+              />
+            </label>
+          </div>
+
+          <!-- Passo 3: Horários -->
+          <div class="step-card">
+            <div class="step-head">
+              <span class="step-num">3</span> Quando verificar
+            </div>
+            <p class="step-desc">
+              Escolha os dias e horários. O programa faz a verificação sozinho
+              nesses momentos, desde que o computador esteja ligado.
+            </p>
+
+            <div class="toggle-row">
+              <label class="switch">
+                <input type="checkbox" id="scheduleEnabled" />
+                <span class="slider"></span>
+              </label>
+              <span>Ativar verificação automática</span>
+            </div>
+
+            <div class="days" id="daysPicker">
+              <button class="day" data-day="MON">Seg</button>
+              <button class="day" data-day="TUE">Ter</button>
+              <button class="day" data-day="WED">Qua</button>
+              <button class="day" data-day="THU">Qui</button>
+              <button class="day" data-day="FRI">Sex</button>
+              <button class="day" data-day="SAT">Sáb</button>
+              <button class="day" data-day="SUN">Dom</button>
+            </div>
+
+            <label class="field">
+              <span>Horários (separe por vírgula)</span>
+              <input
+                type="text"
+                id="scheduleTimes"
+                placeholder="09:00, 10:00, 14:00"
+              />
+            </label>
+
+            <div class="toggle-row">
+              <label class="switch">
+                <input type="checkbox" id="keepaliveEnabled" />
+                <span class="slider"></span>
+              </label>
+              <span>Renovar a sessão todo dia de manhã (recomendado)</span>
+            </div>
+            <label class="field narrow">
+              <span>Horário da renovação</span>
+              <input type="text" id="keepaliveTime" placeholder="08:00" />
+            </label>
+          </div>
+
+          <!-- Passo 4: Comportamento -->
+          <div class="step-card">
+            <div class="step-head">
+              <span class="step-num">4</span> Preferências
+            </div>
+            <div class="toggle-row">
+              <label class="switch">
+                <input type="checkbox" id="autostart" />
+                <span class="slider"></span>
+              </label>
+              <span>Iniciar junto com o computador</span>
+            </div>
+            <div class="toggle-row">
+              <label class="switch">
+                <input type="checkbox" id="showBrowser" />
+                <span class="slider"></span>
+              </label>
+              <span
+                >Mostrar o navegador durante a verificação (para
+                depuração)</span
+              >
+            </div>
+          </div>
+
+          <div class="save-bar">
+            <button class="btn primary lg" id="btnSave">
+              Salvar configuração
+            </button>
+            <span class="inline-status" id="saveStatus"></span>
+          </div>
+        </section>
+
+        <!-- ===================== HISTÓRICO ===================== -->
+        <section class="tab" data-tab="historico">
+          <header class="page-head">
+            <h1>Histórico</h1>
+            <p>Registro completo das atividades deste programa.</p>
+          </header>
+          <div class="log-table" id="logTable">
+            <div class="log-empty">Sem registros ainda.</div>
+          </div>
+        </section>
+
+        <!-- ===================== DIAGNÓSTICO ===================== -->
+        <section class="tab" data-tab="diagnostico">
+          <header class="page-head">
+            <h1>Diagnóstico</h1>
+            <p>Verifica se está tudo pronto para funcionar.</p>
+          </header>
+          <div class="action-row">
+            <button class="btn primary" id="btnDiagnose">
+              Executar diagnóstico
+            </button>
+            <button class="btn ghost" id="btnOpenDiag">
+              Abrir pasta de diagnóstico
+            </button>
+          </div>
+          <p class="action-hint">
+            Quando uma verificação falha, o programa salva uma imagem da tela do
+            eproc naquele momento na pasta de diagnóstico. Essa imagem ajuda a
+            identificar e corrigir o problema rapidamente.
+          </p>
+          <div class="diag-list" id="diagList"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="../shared/messages.js"></script>
+    <script src="renderer.js"></script>
+  </body>
+</html>
