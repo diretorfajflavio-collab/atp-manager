@@ -1,0 +1,88 @@
+name: Compilar instaladores ATP Manager
+
+# Gera os instaladores para Windows, Mac e Linux automaticamente.
+# Dispara quando você cria uma tag de versão (ex: v4.0.0) ou manualmente
+# pelo botão "Run workflow" na aba Actions do GitHub.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: Baixar o navegador (Chromium) para empacotar
+        run: npx playwright install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: "0"
+
+      - name: Mover Chromium para a pasta de empacotamento
+        shell: bash
+        run: |
+          mkdir -p ms-playwright
+          if [ -d "node_modules/playwright-core/.local-browsers" ]; then
+            cp -r node_modules/playwright-core/.local-browsers/* ms-playwright/ || true
+          fi
+          if [ -d "node_modules/.local-browsers" ]; then
+            cp -r node_modules/.local-browsers/* ms-playwright/ || true
+          fi
+          ls -la ms-playwright || true
+
+      - name: Compilar (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npm run dist:win
+
+      - name: Compilar (Mac)
+        if: matrix.os == 'macos-latest'
+        run: npm run dist:mac
+
+      - name: Compilar (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run dist:linux
+
+      - name: Publicar instaladores como artefatos
+        uses: actions/upload-artifact@v4
+        with:
+          name: instaladores-${{ matrix.os }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+          if-no-files-found: warn
+
+  release:
+    name: Criar Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Baixar todos os artefatos
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publicar release com os instaladores
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
