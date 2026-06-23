@@ -13,9 +13,9 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "dist": "electron-builder",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "dist:linux": "electron-builder --linux",
+   "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never",
     "postinstall": "playwright install chromium"
   },
   "dependencies": {
