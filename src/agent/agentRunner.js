@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.0";
+const VERSION = "4.0.1";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -121,19 +121,69 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
       );
       await page.waitForTimeout(1000);
 
-      // Detectar etapa única (senha já visível) vs. duas etapas
-      let pwVisible = false;
-      try {
-        pwVisible = await page
-          .locator("input[type='password']")
-          .first()
-          .isVisible({ timeout: 2000 });
-      } catch (_) {
-        pwVisible = false;
-      }
+      // ── Função auxiliar: revelar (se oculto) e preencher a senha de forma robusta ──
+      const preencherSenha = async () => {
+        // 1) Revela o campo de senha, caso o SSO TJSP o mantenha oculto via CSS
+        await page.evaluate(() => {
+          const pw = document.querySelector("input[type='password']");
+          if (pw) {
+            pw.style.display = "block";
+            pw.style.visibility = "visible";
+            pw.style.opacity = "1";
+            pw.removeAttribute("hidden");
+            pw.removeAttribute("disabled");
+            pw.removeAttribute("readonly");
+            let el = pw.parentElement;
+            for (let i = 0; i < 6 && el; i++) {
+              el.style.display = "block";
+              el.style.visibility = "visible";
+              el.style.opacity = "1";
+              el = el.parentElement;
+            }
+          }
+        });
+        await page.waitForTimeout(300);
 
-      if (pwVisible) {
-        // ── ETAPA ÚNICA ──
+        // 2) Preenche via JavaScript (disparando os eventos que o site espera)
+        await page.evaluate((pwd) => {
+          const pw = document.querySelector("input[type='password']");
+          if (pw) {
+            pw.focus();
+            pw.value = "";
+            pw.value = pwd;
+            pw.dispatchEvent(new Event("input", { bubbles: true }));
+            pw.dispatchEvent(new Event("change", { bubbles: true }));
+            pw.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+          }
+        }, password);
+        await page.waitForTimeout(300);
+
+        // 3) Confere; se não preencheu, tenta digitação direta
+        try {
+          const pwVal = await page
+            .locator("input[type='password']")
+            .first()
+            .inputValue();
+          if (!pwVal) {
+            log("info", "Reforçando preenchimento da senha por digitação...");
+            const pwField = page.locator("input[type='password']").first();
+            await pwField.click({ force: true });
+            await page.keyboard.press("Control+a");
+            await page.keyboard.press("Delete");
+            await page.keyboard.type(password, { delay: 50 });
+          }
+        } catch (_) {}
+      };
+
+      // Detectar o tipo de formulário pela EXISTÊNCIA do campo de senha
+      // (não pela visibilidade — o SSO TJSP costuma deixá-lo oculto via CSS,
+      // mas ele já está presente na mesma tela = login de etapa única).
+      await page.waitForTimeout(500);
+      const pwCount = await page.locator("input[type='password']").count();
+      const pwExiste = pwCount > 0;
+
+      if (pwExiste) {
+        // ── ETAPA ÚNICA (usuário e senha na mesma tela) ──
         log("info", "Formulário de etapa única detectado.");
         const userField = page
           .locator("input[name='username'], input[id='username']")
@@ -145,13 +195,8 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
         await page.keyboard.type(username, { delay: 80 });
         await page.waitForTimeout(400);
 
-        const pwField = page.locator("input[type='password']").first();
-        await pwField.click();
+        await preencherSenha();
         await page.waitForTimeout(400);
-        await page.keyboard.press("Control+a");
-        await page.keyboard.press("Delete");
-        await page.keyboard.type(password, { delay: 100 });
-        await page.waitForTimeout(500);
 
         log("info", "Clicando em Entrar...");
         const submit = page
@@ -161,7 +206,7 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
           .first();
         await submit.click();
       } else {
-        // ── DUAS ETAPAS ──
+        // ── DUAS ETAPAS (reserva: usuário primeiro, senha depois) ──
         log("info", "Formulário de duas etapas detectado. Etapa 1: usuário.");
         const userField = page
           .locator("input[name='username'], input[id='username']")
@@ -179,56 +224,8 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
         await continuar.click();
         await page.waitForTimeout(1500);
 
-        // Forçar visibilidade do campo de senha (SSO TJSP o mantém oculto via CSS)
         log("info", "Etapa 2: revelando e preenchendo campo de senha...");
-        await page.evaluate(() => {
-          const pw = document.querySelector("input[type='password']");
-          if (pw) {
-            pw.style.display = "block";
-            pw.style.visibility = "visible";
-            pw.style.opacity = "1";
-            pw.removeAttribute("hidden");
-            let el = pw.parentElement;
-            for (let i = 0; i < 5 && el; i++) {
-              el.style.display = "block";
-              el.style.visibility = "visible";
-              el = el.parentElement;
-            }
-          }
-        });
-        await page.waitForTimeout(300);
-
-        await page.evaluate((pwd) => {
-          const pw = document.querySelector("input[type='password']");
-          if (pw) {
-            pw.focus();
-            pw.value = "";
-            pw.value = pwd;
-            pw.dispatchEvent(new Event("input", { bubbles: true }));
-            pw.dispatchEvent(new Event("change", { bubbles: true }));
-            pw.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
-          }
-        }, password);
-        await page.waitForTimeout(300);
-
-        // Verificar e usar fallback type() se o JS não preencheu
-        try {
-          const pwVal = await page
-            .locator("input[type='password']")
-            .first()
-            .inputValue();
-          if (!pwVal) {
-            log(
-              "warn",
-              "JS não preencheu a senha, tentando digitação direta...",
-            );
-            const pwField = page.locator("input[type='password']").first();
-            await pwField.click({ force: true });
-            await page.keyboard.press("Control+a");
-            await page.keyboard.press("Delete");
-            await page.keyboard.type(password, { delay: 50 });
-          }
-        } catch (_) {}
+        await preencherSenha();
 
         log("info", "Clicando em Entrar...");
         const submit = page
@@ -308,14 +305,32 @@ async function openAndEnsureSession(cfg, log) {
   const eprocUrl = cfg.eprocUrl || "https://eproc1g.tjsp.jus.br/eproc/";
   const headless = !cfg.showBrowser;
 
-  const browser = await chromium.launch({
+  // Usamos um PERFIL PERSISTENTE: o navegador guarda cookies e a "confiança
+  // do dispositivo" do TJSP numa pasta permanente. Assim, o código de dois
+  // fatores (2FA) é pedido apenas na PRIMEIRA vez; depois o tribunal reconhece
+  // este computador e não pede mais — exatamente como acontece no navegador comum.
+  const path = require("path");
+  const os = require("os");
+  const userDataDir =
+    cfg.browserProfileDir ||
+    path.join(os.homedir(), ".atp-manager", "browser-profile");
+
+  // launchPersistentContext devolve diretamente um "context" (não um browser).
+  const context = await chromium.launchPersistentContext(userDataDir, {
     headless,
+    viewport: { width: 1366, height: 768 },
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
-  const context = await browser.newContext({
-    viewport: { width: 1366, height: 768 },
-  });
-  const page = await context.newPage();
+  // Para manter compatibilidade com o restante do código, expomos um objeto
+  // "browser" cujo close() encerra o contexto persistente.
+  const browser = {
+    close: async () => {
+      try {
+        await context.close();
+      } catch (_) {}
+    },
+  };
+  const page = context.pages()[0] || (await context.newPage());
 
   log("info", `Navegando para ${eprocUrl}...`);
   // Rede de tribunal pode oscilar — tentamos até 3 vezes com espera crescente.
@@ -416,6 +431,99 @@ async function openAndEnsureSession(cfg, log) {
   }
 
   return { browser, context, page, status: "ok", message: "Sessão ativa." };
+}
+
+// ── Login manual interativo (primeira vez / 2FA) ─────────────────────────────
+// Abre o navegador VISÍVEL no mesmo perfil persistente e deixa o usuário fazer
+// o login na mão — incluindo digitar o código de dois fatores e marcar
+// "não pedir novamente neste dispositivo". Quando detecta que entrou no eproc,
+// salva o perfil e fecha. A partir daí, as execuções automáticas não pedem 2FA.
+async function manualLogin(cfg) {
+  const log = makeLogger(cfg.onLog);
+  const chromium = resolveChromium();
+  const eprocUrl = cfg.eprocUrl || "https://eproc1g.tjsp.jus.br/eproc/";
+  const path = require("path");
+  const os = require("os");
+  const userDataDir =
+    cfg.browserProfileDir ||
+    path.join(os.homedir(), ".atp-manager", "browser-profile");
+
+  log(
+    "info",
+    "Abrindo o navegador para login manual. Faça login normalmente — se pedir o código de dois fatores, digite-o e marque 'não pedir novamente neste dispositivo'.",
+  );
+
+  const context = await chromium.launchPersistentContext(userDataDir, {
+    headless: false, // SEMPRE visível — o usuário precisa interagir
+    viewport: { width: 1366, height: 768 },
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+
+  const page = context.pages()[0] || (await context.newPage());
+  try {
+    await page.goto(eprocUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
+  } catch (_) {}
+
+  // Aguarda (até 5 minutos) o usuário concluir o login manualmente.
+  // Consideramos "logado" quando a URL é do eproc e não é mais tela de login.
+  log("info", "Aguardando você concluir o login (até 5 minutos)...");
+  const limite = Date.now() + 5 * 60 * 1000;
+  let logou = false;
+  while (Date.now() < limite) {
+    await page.waitForTimeout(2000);
+    let url = "";
+    try {
+      url = page.url();
+    } catch (_) {
+      // página pode ter sido fechada pelo usuário
+      break;
+    }
+    if (url.includes("eproc") && !isSessionExpired(url)) {
+      logou = true;
+      break;
+    }
+  }
+
+  // Captura os cookies do perfil e envia ao painel, se conectado
+  if (logou) {
+    log("info", "Login concluído! Salvando a confiança deste dispositivo...");
+    try {
+      const fresh = await context.cookies();
+      const toSend = fresh
+        .filter((c) => TJSP_DOMAINS.some((d) => (c.domain || "").includes(d)))
+        .map((c) => ({
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path || "/",
+          secure: !!c.secure,
+          httpOnly: !!c.httpOnly,
+          expirationDate: c.expires,
+        }));
+      if (toSend.length && cfg.serverUrl && cfg.token) {
+        const n = await sendCookies(cfg.serverUrl, cfg.token, toSend);
+        log("info", `${n} cookies sincronizados com o painel.`);
+      }
+    } catch (err) {
+      log("warn", `Não foi possível sincronizar cookies: ${err.message}`);
+    }
+  } else {
+    log(
+      "warn",
+      "Não detectei o login concluído. Você pode tentar novamente quando quiser.",
+    );
+  }
+
+  await context.close();
+  return {
+    status: logou ? "success" : "error",
+    message: logou
+      ? "Login manual concluído. As próximas verificações serão automáticas, sem pedir o código de dois fatores."
+      : "O login manual não foi concluído. Tente novamente.",
+  };
 }
 
 // ── Modo keepalive: apenas renova a sessão/cookies ───────────────────────────
@@ -609,6 +717,7 @@ module.exports = {
   validateToken,
   runNow,
   keepalive,
+  manualLogin,
   diagnose,
   // exportado para testes
   isSessionExpired,

@@ -134,3 +134,19 @@ própria interface — se um dia o backend mudar de lugar, basta atualizar o cam
 
 Esses dois recursos juntos permitem validar e ajustar o sistema observando o
 comportamento real, com risco zero de alterar processos indevidamente.
+
+---
+
+## Versão 4.0.1 — Ajustes do login eproc
+
+- **Login de etapa única**: o preenchimento de usuário e senha na mesma tela
+  (formato usado pelo eproc TJSP) foi corrigido. A detecção agora se baseia na
+  existência do campo de senha, não na sua visibilidade — resolvendo o caso em
+  que o campo vem oculto via CSS.
+- **Autenticação de dois fatores (2FA)**: o navegador do programa agora usa um
+  **perfil persistente**, que guarda os cookies e a confiança do dispositivo
+  entre execuções. O código 2FA é pedido apenas na primeira vez.
+- **Botão "Fazer login manual (1ª vez)"**: abre o navegador visível para o
+  primeiro acesso, permitindo digitar o código 2FA e marcar "não pedir
+  novamente neste dispositivo". A partir daí, as verificações automáticas rodam
+  sem pedir o código.

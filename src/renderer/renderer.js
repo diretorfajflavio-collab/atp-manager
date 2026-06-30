@@ -394,6 +394,39 @@ $("#btnOpenDiag").addEventListener("click", async () => {
   await window.atp.openDiagFolder();
 });
 
+$("#btnManualLogin").addEventListener("click", async () => {
+  const btn = $("#btnManualLogin");
+  btn.disabled = true;
+  setStatus("Aguardando login manual...", "busy");
+  pushLog({
+    level: "info",
+    message:
+      "Abrindo o navegador para login manual. Faça login e, se pedir, digite o código de dois fatores e marque 'não pedir novamente neste dispositivo'.",
+    at: new Date().toISOString(),
+  });
+  try {
+    const res = await window.atp.manualLogin();
+    pushLog({
+      level: res.status === "success" ? "info" : "error",
+      message: humanizeMessage(res.message),
+      at: new Date().toISOString(),
+    });
+    setStatus(
+      res.status === "success" ? "Pronto" : "Precisa de atenção",
+      res.status === "success" ? "ok" : "err",
+    );
+  } catch (err) {
+    pushLog({
+      level: "error",
+      message: humanizeMessage(err.message),
+      at: new Date().toISOString(),
+    });
+    setStatus("Precisa de atenção", "err");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // ---------- Eventos vindos do processo principal ----------
 window.atp.onStatus((s) => {
   const kind = /erro/i.test(s) ? "err" : /pronto/i.test(s) ? "ok" : "busy";

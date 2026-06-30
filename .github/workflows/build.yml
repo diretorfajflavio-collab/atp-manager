@@ -34,12 +34,13 @@ jobs:
       - name: Baixar o navegador (Chromium) para empacotar
         run: npx playwright install chromium
         env:
-          PLAYWRIGHT_BROWSERS_PATH: "0"
+          PLAYWRIGHT_BROWSERS_PATH: "0" # instala dentro do projeto (node_modules/.local-browsers)
 
       - name: Mover Chromium para a pasta de empacotamento
         shell: bash
         run: |
           mkdir -p ms-playwright
+          # Copia o Chromium baixado para a pasta que o electron-builder empacota
           if [ -d "node_modules/playwright-core/.local-browsers" ]; then
             cp -r node_modules/playwright-core/.local-browsers/* ms-playwright/ || true
           fi

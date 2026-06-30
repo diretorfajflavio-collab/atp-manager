@@ -349,6 +349,27 @@ body {
   line-height: 1.5;
   max-width: 640px;
 }
+.firstrun-box {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 24px;
+}
+.firstrun-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+.firstrun-text strong {
+  display: block;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
 
 /* ---------- Live log ---------- */
 .live-log {

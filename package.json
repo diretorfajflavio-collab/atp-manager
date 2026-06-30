@@ -1,7 +1,7 @@
 {
   "name": "atp-manager-desktop",
   "productName": "ATP Manager",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "Assistente de Automatização de Tramitação Processual — Agente local com interface gráfica",
   "author": {
     "name": "Flávio Fernandes Pacetta",
@@ -13,9 +13,9 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "dist": "electron-builder",
-   "dist:win": "electron-builder --win --publish never",
-    "dist:mac": "electron-builder --mac --publish never",
-    "dist:linux": "electron-builder --linux --publish never",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
     "postinstall": "playwright install chromium"
   },
   "dependencies": {

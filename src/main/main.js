@@ -44,6 +44,12 @@ let isQuitting = false;
 // Pasta onde ficam as capturas de tela de diagnóstico (falhas)
 const DIAG_DIR = path.join(app.getPath("userData"), "diagnostico");
 
+// Pasta do perfil persistente do navegador (cookies + confiança de dispositivo p/ 2FA)
+const BROWSER_PROFILE_DIR = path.join(
+  app.getPath("userData"),
+  "browser-profile",
+);
+
 // ---------------------------------------------------------------------------
 // Janela principal
 // ---------------------------------------------------------------------------
@@ -211,6 +217,7 @@ ipcMain.handle("agent:run-now", async (_e, opts) => {
     ...store.getAll(),
     ...opts,
     screenshotDir: DIAG_DIR,
+    browserProfileDir: BROWSER_PROFILE_DIR,
     onLog: (entry) =>
       mainWindow && mainWindow.webContents.send("log-entry", entry),
     onStatus: (s) => {
@@ -227,10 +234,21 @@ ipcMain.handle("open-diag-folder", async () => {
   return DIAG_DIR;
 });
 
+// Login manual interativo (primeira vez / autenticação de dois fatores)
+ipcMain.handle("agent:manual-login", async () => {
+  return agent.manualLogin({
+    ...store.getAll(),
+    browserProfileDir: BROWSER_PROFILE_DIR,
+    onLog: (entry) =>
+      mainWindow && mainWindow.webContents.send("log-entry", entry),
+  });
+});
+
 // Renovar cookies / login (keepalive)
 ipcMain.handle("agent:keepalive", async () => {
   return agent.keepalive({
     ...store.getAll(),
+    browserProfileDir: BROWSER_PROFILE_DIR,
     onLog: (entry) =>
       mainWindow && mainWindow.webContents.send("log-entry", entry),
   });

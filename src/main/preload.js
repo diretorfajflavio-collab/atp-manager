@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("atp", {
   runNow: (opts) => ipcRenderer.invoke("agent:run-now", opts || {}),
   openDiagFolder: () => ipcRenderer.invoke("open-diag-folder"),
   keepalive: () => ipcRenderer.invoke("agent:keepalive"),
+  manualLogin: () => ipcRenderer.invoke("agent:manual-login"),
   diagnose: () => ipcRenderer.invoke("agent:diagnose"),
 
   // Sistema
