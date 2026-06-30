@@ -30,6 +30,7 @@
     "appId": "br.jus.tjsp.atpmanager",
     "productName": "ATP Manager",
     "copyright": "Copyright © 2026 Flávio Fernandes Pacetta",
+    "publish": null,
     "directories": {
       "output": "dist",
       "buildResources": "build"
