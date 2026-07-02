@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.1";
+const VERSION = "4.0.2";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -144,33 +144,50 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
         });
         await page.waitForTimeout(300);
 
-        // 2) Preenche via JavaScript (disparando os eventos que o site espera)
-        await page.evaluate((pwd) => {
+        const pwField = page.locator("input[type='password']").first();
+
+        // 2) Foca o campo e limpa qualquer conteúdo
+        try {
+          await pwField.click({ force: true });
+        } catch (_) {}
+        await page.keyboard.press("Control+a");
+        await page.keyboard.press("Delete");
+        await page.waitForTimeout(150);
+
+        // 3) MÉTODO PRINCIPAL: insertText insere o texto diretamente no campo
+        // focado, caractere a caractere, SEM simular teclas físicas. Isso é
+        // imune ao layout do teclado (ABNT2/BR), corrigindo senhas com símbolos
+        // como @ # ! $ % & que antes saíam trocados.
+        await page.keyboard.insertText(password);
+        await page.waitForTimeout(200);
+
+        // 4) Dispara os eventos que o site espera reconhecer
+        await page.evaluate(() => {
           const pw = document.querySelector("input[type='password']");
           if (pw) {
-            pw.focus();
-            pw.value = "";
-            pw.value = pwd;
             pw.dispatchEvent(new Event("input", { bubbles: true }));
             pw.dispatchEvent(new Event("change", { bubbles: true }));
-            pw.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
           }
-        }, password);
-        await page.waitForTimeout(300);
+        });
+        await page.waitForTimeout(150);
 
-        // 3) Confere; se não preencheu, tenta digitação direta
+        // 5) Confere se o comprimento bate; se não, tenta uma vez o método .value
         try {
-          const pwVal = await page
-            .locator("input[type='password']")
-            .first()
-            .inputValue();
-          if (!pwVal) {
-            log("info", "Reforçando preenchimento da senha por digitação...");
-            const pwField = page.locator("input[type='password']").first();
-            await pwField.click({ force: true });
-            await page.keyboard.press("Control+a");
-            await page.keyboard.press("Delete");
-            await page.keyboard.type(password, { delay: 50 });
+          const pwVal = await pwField.inputValue();
+          if (!pwVal || pwVal.length !== password.length) {
+            log(
+              "info",
+              "Ajustando preenchimento da senha (verificação de integridade)...",
+            );
+            await page.evaluate((pwd) => {
+              const pw = document.querySelector("input[type='password']");
+              if (pw) {
+                pw.focus();
+                pw.value = pwd;
+                pw.dispatchEvent(new Event("input", { bubbles: true }));
+                pw.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+            }, password);
           }
         } catch (_) {}
       };
@@ -192,7 +209,7 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
         await page.waitForTimeout(200);
         await page.keyboard.press("Control+a");
         await page.keyboard.press("Delete");
-        await page.keyboard.type(username, { delay: 80 });
+        await page.keyboard.insertText(username);
         await page.waitForTimeout(400);
 
         await preencherSenha();
