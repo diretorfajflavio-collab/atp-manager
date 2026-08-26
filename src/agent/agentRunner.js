@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.3";
+const VERSION = "4.0.4";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -97,6 +97,21 @@ function isSessionExpired(url) {
 }
 
 // ── Login automático SSO TJSP (porte fiel do Python) ─────────────────────────
+// ── Localizar o campo de senha REAL (não um campo-armadilha anti-robô) ──────
+// O Keycloak (SSO do TJSP) usa por padrão id="password" no campo verdadeiro.
+// Algumas páginas de login incluem um campo extra do tipo "password" oculto,
+// usado só para detectar robôs (honeypot): se algo o preenche, o login é
+// recusado mesmo com a senha certa no campo real. Por isso NUNCA buscamos
+// "o primeiro input type=password da página" sem antes tentar o id/name
+// específico — evita digitar na armadilha por engano.
+async function passwordLocator(page) {
+  const byId = page.locator("input#password");
+  if (await byId.count()) return byId.first();
+  const byName = page.locator("input[name='password']");
+  if (await byName.count()) return byName.first();
+  return page.locator("input[type='password']").first();
+}
+
 async function performAutoLogin(page, username, password, eprocUrl, log) {
   log("info", `Realizando login automático como: ${username}`);
   try {
@@ -123,9 +138,14 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
 
       // ── Função auxiliar: revelar (se oculto) e preencher a senha de forma robusta ──
       const preencherSenha = async () => {
-        // 1) Revela o campo de senha, caso o SSO TJSP o mantenha oculto via CSS
+        // 1) Revela o campo de senha REAL (se oculto via CSS) — nunca mexe em
+        // outros campos type=password que possam existir na página (evita
+        // revelar/preencher um eventual campo-armadilha anti-robô).
         await page.evaluate(() => {
-          const pw = document.querySelector("input[type='password']");
+          const pw =
+            document.querySelector("#password") ||
+            document.querySelector("input[name='password']") ||
+            document.querySelector("input[type='password']");
           if (pw) {
             pw.style.display = "block";
             pw.style.visibility = "visible";
@@ -144,7 +164,15 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
         });
         await page.waitForTimeout(300);
 
-        const pwField = page.locator("input[type='password']").first();
+        const pwField = await passwordLocator(page);
+        try {
+          const idAttr = await pwField.getAttribute("id");
+          const nameAttr = await pwField.getAttribute("name");
+          log(
+            "info",
+            `Campo de senha identificado (id="${idAttr || "—"}", name="${nameAttr || "—"}").`,
+          );
+        } catch (_) {}
 
         // 2) Foca o campo e limpa qualquer conteúdo
         try {
@@ -163,7 +191,10 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
 
         // 4) Dispara os eventos que o site espera reconhecer
         await page.evaluate(() => {
-          const pw = document.querySelector("input[type='password']");
+          const pw =
+            document.querySelector("#password") ||
+            document.querySelector("input[name='password']") ||
+            document.querySelector("input[type='password']");
           if (pw) {
             pw.dispatchEvent(new Event("input", { bubbles: true }));
             pw.dispatchEvent(new Event("change", { bubbles: true }));
@@ -180,7 +211,10 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
               "Ajustando preenchimento da senha (verificação de integridade)...",
             );
             await page.evaluate((pwd) => {
-              const pw = document.querySelector("input[type='password']");
+              const pw =
+                document.querySelector("#password") ||
+                document.querySelector("input[name='password']") ||
+                document.querySelector("input[type='password']");
               if (pw) {
                 pw.focus();
                 pw.value = pwd;
@@ -196,7 +230,11 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
       // (não pela visibilidade — o SSO TJSP costuma deixá-lo oculto via CSS,
       // mas ele já está presente na mesma tela = login de etapa única).
       await page.waitForTimeout(500);
-      const pwCount = await page.locator("input[type='password']").count();
+      const pwCount = await page
+        .locator(
+          "input#password, input[name='password'], input[type='password']",
+        )
+        .count();
       const pwExiste = pwCount > 0;
 
       if (pwExiste) {
@@ -217,18 +255,16 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
 
         // VERIFICAÇÃO FINAL: a página do TJSP às vezes LIMPA o campo de senha
         // logo após o preenchimento. Conferimos imediatamente antes de clicar
-        // e re-preenchemos se necessário.
+        // e re-preenchemos se necessário — sempre no campo REAL (nunca num
+        // possível campo-armadilha).
         try {
-          const chk = await page
-            .locator("input[type='password']")
-            .first()
-            .inputValue();
+          const pf = await passwordLocator(page);
+          const chk = await pf.inputValue();
           if (!chk || chk.length !== password.length) {
             log(
               "info",
               "Campo de senha foi limpo pela página — re-preenchendo...",
             );
-            const pf = page.locator("input[type='password']").first();
             await pf.click({ force: true });
             await page.keyboard.insertText(password);
             await page.waitForTimeout(200);
@@ -265,18 +301,16 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
         await preencherSenha();
 
         // VERIFICAÇÃO FINAL (mesma proteção do fluxo de etapa única):
-        // re-preenche a senha se a página a tiver limpado antes do clique.
+        // re-preenche a senha se a página a tiver limpado antes do clique —
+        // sempre no campo REAL (nunca num possível campo-armadilha).
         try {
-          const chk = await page
-            .locator("input[type='password']")
-            .first()
-            .inputValue();
+          const pf = await passwordLocator(page);
+          const chk = await pf.inputValue();
           if (!chk || chk.length !== password.length) {
             log(
               "info",
               "Campo de senha foi limpo pela página — re-preenchendo...",
             );
-            const pf = page.locator("input[type='password']").first();
             await pf.click({ force: true });
             await page.keyboard.insertText(password);
             await page.waitForTimeout(200);
