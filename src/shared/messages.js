@@ -31,7 +31,7 @@
       s.includes("econnrefused") ||
       s.includes("net::")
     ) {
-      return "Não consegui acessar o eproc. Verifique se este computador está conectado à rede do tribunal.";
+      return "O eproc não respondeu a tempo. Pode ser oscilação de internet ou do próprio eproc — tente novamente em alguns minutos. Se persistir, confira também se o usuário e a senha estão corretos na aba Configuração.";
     }
     if (
       s.includes("token") ||
