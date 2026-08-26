@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.2";
+const VERSION = "4.0.3";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -215,6 +215,26 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
         await preencherSenha();
         await page.waitForTimeout(400);
 
+        // VERIFICAÇÃO FINAL: a página do TJSP às vezes LIMPA o campo de senha
+        // logo após o preenchimento. Conferimos imediatamente antes de clicar
+        // e re-preenchemos se necessário.
+        try {
+          const chk = await page
+            .locator("input[type='password']")
+            .first()
+            .inputValue();
+          if (!chk || chk.length !== password.length) {
+            log(
+              "info",
+              "Campo de senha foi limpo pela página — re-preenchendo...",
+            );
+            const pf = page.locator("input[type='password']").first();
+            await pf.click({ force: true });
+            await page.keyboard.insertText(password);
+            await page.waitForTimeout(200);
+          }
+        } catch (_) {}
+
         log("info", "Clicando em Entrar...");
         const submit = page
           .locator(
@@ -243,6 +263,25 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
 
         log("info", "Etapa 2: revelando e preenchendo campo de senha...");
         await preencherSenha();
+
+        // VERIFICAÇÃO FINAL (mesma proteção do fluxo de etapa única):
+        // re-preenche a senha se a página a tiver limpado antes do clique.
+        try {
+          const chk = await page
+            .locator("input[type='password']")
+            .first()
+            .inputValue();
+          if (!chk || chk.length !== password.length) {
+            log(
+              "info",
+              "Campo de senha foi limpo pela página — re-preenchendo...",
+            );
+            const pf = page.locator("input[type='password']").first();
+            await pf.click({ force: true });
+            await page.keyboard.insertText(password);
+            await page.waitForTimeout(200);
+          }
+        } catch (_) {}
 
         log("info", "Clicando em Entrar...");
         const submit = page
@@ -378,7 +417,7 @@ async function openAndEnsureSession(cfg, log) {
   if (!navegou) {
     await browser.close();
     throw new Error(
-      `Não foi possível acessar o eproc após ${maxAttempts} tentativas: ${lastErr ? lastErr.message : "erro desconhecido"}. Verifique se está na rede do tribunal.`,
+      `Não foi possível acessar o eproc após ${maxAttempts} tentativas: ${lastErr ? lastErr.message : "erro desconhecido"}. Pode ser oscilação da internet ou do próprio eproc.`,
     );
   }
 
