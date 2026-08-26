@@ -1,7 +1,7 @@
 {
   "name": "atp-manager-desktop",
   "productName": "ATP Manager",
-  "version": "4.0.2",
+  "version": "4.0.3",
   "description": "Assistente de Automatização de Tramitação Processual — Agente local com interface gráfica",
   "author": {
     "name": "Flávio Fernandes Pacetta",
