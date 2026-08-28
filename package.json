@@ -1,84 +1,66 @@
-{
-  "name": "atp-manager-desktop",
-  "productName": "ATP Manager",
-  "version": "4.0.4",
-  "description": "Assistente de Automatização de Tramitação Processual — Agente local com interface gráfica",
-  "author": {
-    "name": "Flávio Fernandes Pacetta",
-    "email": "fpacetta@tjsp.jus.br"
-  },
-  "license": "MIT",
-  "main": "src/main/main.js",
-  "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev",
-    "dist": "electron-builder",
-    "dist:win": "electron-builder --win --publish never",
-    "dist:mac": "electron-builder --mac --publish never",
-    "dist:linux": "electron-builder --linux --publish never",
-    "postinstall": "playwright install chromium"
-  },
-  "dependencies": {
-    "playwright-core": "^1.49.0",
-    "playwright": "^1.49.0"
-  },
-  "devDependencies": {
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
-  },
-  "build": {
-    "appId": "br.jus.tjsp.atpmanager",
-    "productName": "ATP Manager",
-    "copyright": "Copyright © 2026 Flávio Fernandes Pacetta",
-    "publish": null,
-    "directories": {
-      "output": "dist",
-      "buildResources": "build"
-    },
-    "files": [
-      "src/**/*",
-      "node_modules/**/*",
-      "!**/*.map"
-    ],
-    "extraResources": [
-      {
-        "from": "ms-playwright",
-        "to": "ms-playwright",
-        "filter": ["**/*"]
-      }
-    ],
-    "win": {
-      "target": [
-        { "target": "nsis", "arch": ["x64"] }
-      ],
-      "icon": "build/icon.ico",
-      "artifactName": "ATP-Manager-Setup-${version}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "ATP Manager",
-      "installerLanguages": ["pt_BR"],
-      "language": "1046"
-    },
-    "mac": {
-      "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] }
-      ],
-      "icon": "build/icon.icns",
-      "category": "public.app-category.productivity",
-      "artifactName": "ATP-Manager-${version}.${ext}"
-    },
-    "linux": {
-      "target": [
-        { "target": "AppImage", "arch": ["x64"] }
-      ],
-      "icon": "build/icon.png",
-      "category": "Office",
-      "artifactName": "ATP-Manager-${version}.${ext}"
-    }
+/**
+ * ATP Manager — Tradução de mensagens técnicas
+ * ----------------------------------------------
+ * Converte erros técnicos em orientações claras para servidores de tribunal.
+ * Compartilhado entre a interface e os testes (UMD: funciona em Node e browser).
+ */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) {
+    module.exports = factory();
+  } else {
+    root.ATPMessages = factory();
   }
-}
+})(typeof self !== "undefined" ? self : this, function () {
+  function humanizeMessage(raw) {
+    if (!raw) return "Ocorreu um problema não identificado.";
+    const s = String(raw).toLowerCase();
+    if (
+      s.includes("session_expired") ||
+      s.includes("sessão expirada") ||
+      s.includes("sessao expirada") ||
+      s.includes("login não") ||
+      s.includes("login nao")
+    ) {
+      return "Não foi possível entrar no eproc. Confira se o usuário e a senha estão corretos na aba Configuração.";
+    }
+    if (
+      s.includes("rede do tribunal") ||
+      s.includes("timeout") ||
+      s.includes("etimedout") ||
+      s.includes("enotfound") ||
+      s.includes("econnrefused") ||
+      s.includes("net::")
+    ) {
+      const detalhe = String(raw).slice(0, 200);
+      return (
+        "O eproc não respondeu a tempo. Pode ser oscilação de internet ou do próprio eproc — tente novamente em alguns minutos. Se persistir, confira também se o usuário e a senha estão corretos na aba Configuração." +
+        `\nDetalhe técnico: ${detalhe}`
+      );
+    }
+    if (
+      s.includes("token") ||
+      s.includes(" 401") ||
+      s.includes(" 403") ||
+      s.includes("unauthorized") ||
+      s.includes("forbidden")
+    ) {
+      return "O código de acesso parece inválido ou expirou. Gere um novo no painel e cole na aba Configuração.";
+    }
+    if (
+      s.includes("2fa") ||
+      s.includes("duas etapas") ||
+      s.includes("verificação em duas")
+    ) {
+      return "O eproc pediu verificação em duas etapas. Faça um login manual uma vez para autorizar este computador.";
+    }
+    if (
+      s.includes("chromium") ||
+      s.includes("navegador") ||
+      s.includes("browser")
+    ) {
+      return "Houve um problema ao abrir o navegador interno. Tente reiniciar o programa.";
+    }
+    return raw;
+  }
+  return { humanizeMessage };
+});
