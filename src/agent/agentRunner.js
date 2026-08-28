@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.4";
+const VERSION = "4.0.5";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -112,7 +112,39 @@ async function passwordLocator(page) {
   return page.locator("input[type='password']").first();
 }
 
-async function performAutoLogin(page, username, password, eprocUrl, log) {
+// ── Captura de tela quando o login falha ─────────────────────────────────
+// Antes, só as falhas durante a navegação pelos processos geravam print.
+// Falhas de login (que são as mais frequentes na calibragem inicial) não
+// deixavam nenhum rastro visual — daí a pasta de diagnóstico aparecer vazia
+// mesmo após falhas reais. Esta função cobre esse caso.
+async function captureLoginFailure(page, label, screenshotDir, log) {
+  try {
+    if (!screenshotDir) return null;
+    const fs = require("fs");
+    const path = require("path");
+    fs.mkdirSync(screenshotDir, { recursive: true });
+    const safe = String(label)
+      .replace(/[^a-z0-9_-]/gi, "_")
+      .slice(0, 60);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const file = path.join(screenshotDir, `login_falha_${safe}_${stamp}.png`);
+    await page.screenshot({ path: file, fullPage: true });
+    if (log) log("info", `Captura de tela salva para diagnóstico: ${file}`);
+    return file;
+  } catch (err) {
+    if (log) log("warn", `Não foi possível capturar a tela: ${err.message}`);
+    return null;
+  }
+}
+
+async function performAutoLogin(
+  page,
+  username,
+  password,
+  eprocUrl,
+  log,
+  screenshotDir = null,
+) {
   log("info", `Realizando login automático como: ${username}`);
   try {
     await page.goto(eprocUrl, {
@@ -352,9 +384,21 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
             .first();
           if (await errEl.isVisible({ timeout: 2000 })) {
             const errText = (await errEl.textContent()) || "Erro desconhecido";
+            await captureLoginFailure(
+              page,
+              "erro_visivel_no_form",
+              screenshotDir,
+              log,
+            );
             return { ok: false, error: `Erro de login: ${errText.trim()}` };
           }
         } catch (_) {}
+        await captureLoginFailure(
+          page,
+          "login_nao_concluido",
+          screenshotDir,
+          log,
+        );
         return {
           ok: false,
           error: "Login não concluído — verifique as credenciais ou 2FA.",
@@ -367,8 +411,10 @@ async function performAutoLogin(page, username, password, eprocUrl, log) {
       log("info", "Sessão já ativa, login não foi necessário.");
       return { ok: true };
     }
+    await captureLoginFailure(page, "url_inesperada", screenshotDir, log);
     return { ok: false, error: `URL inesperada após navegação: ${currentUrl}` };
   } catch (err) {
+    await captureLoginFailure(page, "erro_inesperado", screenshotDir, log);
     return {
       ok: false,
       error: `Erro durante login automático: ${err.message}`,
@@ -467,6 +513,7 @@ async function openAndEnsureSession(cfg, log) {
         cfg.eprocPassword,
         eprocUrl,
         log,
+        cfg.screenshotDir || null,
       );
       if (!res.ok) {
         await browser.close();
