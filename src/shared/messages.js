@@ -31,7 +31,11 @@
       s.includes("econnrefused") ||
       s.includes("net::")
     ) {
-      return "O eproc não respondeu a tempo. Pode ser oscilação de internet ou do próprio eproc — tente novamente em alguns minutos. Se persistir, confira também se o usuário e a senha estão corretos na aba Configuração.";
+      const detalhe = String(raw).slice(0, 200);
+      return (
+        "O eproc não respondeu a tempo. Pode ser oscilação de internet ou do próprio eproc — tente novamente em alguns minutos. Se persistir, confira também se o usuário e a senha estão corretos na aba Configuração." +
+        `\nDetalhe técnico: ${detalhe}`
+      );
     }
     if (
       s.includes("token") ||
