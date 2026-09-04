@@ -167,10 +167,20 @@ test("sessão expirada → orientação sobre usuário/senha", () => {
     humanizeMessage("status: session_expired").includes("usuário e a senha"),
   );
 });
-test("timeout de rede → orientação sobre rede do tribunal", () => {
+test("timeout de rede → orientação sobre oscilação, sem culpar a rede do tribunal", () => {
+  const m = humanizeMessage("Error: net::ERR_TIMED_OUT");
+  assert.ok(m.includes("não respondeu a tempo"));
   assert.ok(
-    humanizeMessage("Error: net::ERR_TIMED_OUT").includes("rede do tribunal"),
+    !m.includes("rede do tribunal"),
+    "não deve presumir rede do tribunal: o eproc é acessível pela web",
   );
+});
+test("timeout → mantém o detalhe técnico original para diagnóstico", () => {
+  const m = humanizeMessage(
+    "Erro durante login automático: page.click: Timeout 30000ms exceeded.",
+  );
+  assert.ok(m.includes("Detalhe técnico"));
+  assert.ok(m.includes("Timeout 30000ms exceeded"));
 });
 test("401 → orientação sobre código de acesso", () => {
   assert.ok(

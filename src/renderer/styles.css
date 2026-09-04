@@ -349,6 +349,20 @@ body {
   line-height: 1.5;
   max-width: 640px;
 }
+.version-badge {
+  display: inline-block;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin-bottom: 20px;
+}
+.version-badge strong {
+  color: var(--amber, #b97d1f);
+}
+
 .firstrun-box {
   display: flex;
   align-items: center;

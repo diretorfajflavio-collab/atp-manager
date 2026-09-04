@@ -199,6 +199,7 @@ app.on("before-quit", () => {
 
 // Configuração: ler e salvar
 ipcMain.handle("config:get", () => store.getAll());
+ipcMain.handle("app:get-version", () => agent.VERSION);
 ipcMain.handle("config:set", (_e, partial) => {
   store.setMany(partial);
   // Reaplica o agendamento se os horários mudaram

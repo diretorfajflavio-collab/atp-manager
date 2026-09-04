@@ -10,6 +10,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("atp", {
   // Configuração
   getConfig: () => ipcRenderer.invoke("config:get"),
+  getVersion: () => ipcRenderer.invoke("app:get-version"),
   setConfig: (partial) => ipcRenderer.invoke("config:set", partial),
 
   // Agente

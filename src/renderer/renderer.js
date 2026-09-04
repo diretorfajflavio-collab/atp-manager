@@ -7,6 +7,18 @@ const $$ = (sel) => document.querySelectorAll(sel);
 let config = {};
 const historyLog = [];
 
+// ---------- Versão real do programa (nunca mais um número fixo errado) ----------
+// O rodapé antes mostrava sempre "v4.0.0", travado no texto do HTML.
+// Agora buscamos a versão de verdade do agente e preenchemos os dois lugares
+// que a exibem: o rodapé da barra lateral e o selo na aba Diagnóstico.
+window.atp.getVersion().then((v) => {
+  const label = `v${v}`;
+  const footer = $("#versionLabel");
+  if (footer) footer.textContent = label;
+  const badge = $("#versionBadgeValue");
+  if (badge) badge.textContent = label;
+});
+
 // ---------- Tradução de mensagens técnicas para linguagem humana ----------
 // (definida em shared/messages.js, carregada antes deste script)
 const humanizeMessage = window.ATPMessages.humanizeMessage;

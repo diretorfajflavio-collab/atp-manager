@@ -150,3 +150,66 @@ comportamento real, com risco zero de alterar processos indevidamente.
   primeiro acesso, permitindo digitar o código 2FA e marcar "não pedir
   novamente neste dispositivo". A partir daí, as verificações automáticas rodam
   sem pedir o código.
+
+---
+
+## Versão 4.0.2 — Correção da digitação de senha
+
+- **Senhas com símbolos (@ # ! $ % &)**: a digitação automática usava um método
+  sensível ao layout do teclado (ABNT2/BR), o que fazia caracteres especiais
+  saírem trocados e o login falhar com "senha incorreta". Agora usamos
+  `insertText`, que insere o texto diretamente no campo, imune ao layout do
+  teclado. O mesmo se aplica ao preenchimento do usuário.
+
+---
+
+## Versão 4.0.3 — Proteção contra limpeza do campo de senha
+
+- **Campo de senha "sumindo"**: em algumas telas do SSO TJSP, a página limpa o
+  campo de senha logo após o preenchimento automático (observado no fluxo de
+  duas etapas). Agora o agente confere o campo IMEDIATAMENTE antes de clicar em
+  Entrar e re-preenche se tiver sido limpo — nos dois fluxos (etapa única e
+  duas etapas).
+
+---
+
+## Versão 4.0.4 — Campo de senha correto (evita possível honeypot)
+
+- **"Usuário ou senha incorretos" mesmo com a senha certa**: o preenchimento
+  automático buscava "o primeiro campo do tipo senha da página". Se a página
+  de login contiver um campo-armadilha oculto (usado para detectar robôs),
+  digitar nele preenche algo na tela (por isso os asteriscos apareciam), mas
+  o eproc rejeita porque o campo de senha VERDADEIRO continua vazio.
+- Agora o agente prioriza o campo pelo identificador padrão do Keycloak
+  (`id="password"`), depois por `name="password"`, e só por último recorre ao
+  seletor genérico — evitando digitar no campo errado.
+- Um log informativo (`Campo de senha identificado (id="…", name="…")`) foi
+  adicionado para facilitar qualquer diagnóstico futuro.
+
+---
+
+## Versão 4.0.5 — Diagnóstico visual das falhas de login
+
+- **Captura de tela também em falhas de LOGIN** (antes só existia para falhas
+  durante a navegação pelos processos). Agora, qualquer falha no login
+  automático — timeout, erro visível na tela, URL inesperada — salva um print
+  na pasta de diagnóstico, com o motivo no nome do arquivo
+  (`login_falha_<motivo>_<data-hora>.png`).
+- **Mensagens de timeout agora incluem o detalhe técnico original** (ex.: qual
+  ação especificamente não respondeu a tempo), além da orientação em
+  linguagem simples — apoia o diagnóstico durante a fase de calibragem sem
+  perder a clareza para o uso do dia a dia.
+
+---
+
+## Versão 4.0.6 — A versão instalada agora aparece de verdade na tela
+
+- **Corrigido o bug que mais nos custou tempo neste projeto**: o rodapé da
+  tela inicial mostrava sempre "v4.0.0", travado no texto do HTML, não
+  importa qual versão estivesse realmente instalada. Isso levou a testar
+  builds antigos por engano diversas vezes.
+- Agora o programa busca a versão real do agente (o mesmo número que aparece
+  na primeira linha da Atividade ao vivo) e mostra em dois lugares visíveis:
+  o rodapé da barra lateral e um selo no topo da aba Diagnóstico.
+- Antes de qualquer teste, basta olhar o rodapé ou a aba Diagnóstico — não é
+  mais necessário rodar uma verificação e ler o log para saber a versão.
