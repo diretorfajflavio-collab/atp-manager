@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.6";
+const VERSION = "4.0.8";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -358,18 +358,56 @@ async function performAutoLogin(
         await submit.click({ force: true });
       }
 
-      // Aguardar redirecionamento de volta ao eproc
+      // Aguardar redirecionamento de volta ao eproc — e lidar com a tela de
+      // "Seleção de perfil" (aparece para usuários com mais de uma
+      // lotação/perfil, como Chefe de Cartório e Servidor Unidade Judicial).
+      // Sem isso, o programa ficava esperando 30s "à toa" nessa tela.
       log("info", "Aguardando redirecionamento após login...");
-      try {
-        await page.waitForURL(
-          (url) =>
-            url.toString().includes("eproc") && !url.toString().includes("sso"),
-          {
-            timeout: 30000,
-          },
-        );
-      } catch (_) {}
-      await page.waitForTimeout(2000);
+      const limiteRedirect = Date.now() + 60000;
+      let perfilEscolhido = false;
+      while (Date.now() < limiteRedirect) {
+        let urlAtual = "";
+        try {
+          urlAtual = page.url();
+        } catch (_) {
+          break;
+        }
+        if (urlAtual.includes("eproc") && !urlAtual.includes("sso")) break;
+
+        if (!perfilEscolhido) {
+          try {
+            const temSelecaoPerfil = await page
+              .locator("text=/Sele[çc][ãa]o de perfil/i")
+              .first()
+              .isVisible({ timeout: 500 });
+            if (temSelecaoPerfil) {
+              // Preferência: o perfil "Chefe de Cartório" (função configurada
+              // para esta automação). Se não existir, usa a primeira opção
+              // disponível na lista — mantém o programa útil para outras
+              // lotações/perfis no futuro.
+              let opcao = page.locator("text=/CHEFE DE CART[ÓO]RIO/i").first();
+              if (!(await opcao.count())) {
+                opcao = page
+                  .locator(
+                    "table tr:not(:first-child) td, table tr:not(:first-child) a, .list-group-item, a[href*='usuario']",
+                  )
+                  .first();
+              }
+              const textoOpcao = ((await opcao.textContent()) || "").trim();
+              log(
+                "info",
+                `Tela de seleção de perfil detectada. Selecionando: "${textoOpcao || "primeira opção"}"...`,
+              );
+              await opcao.click();
+              perfilEscolhido = true;
+              await page.waitForTimeout(1500);
+              continue;
+            }
+          } catch (_) {}
+        }
+        await page.waitForTimeout(500);
+      }
+      await page.waitForTimeout(1000);
 
       const finalUrl = page.url();
       log("info", `URL final: ${finalUrl}`);
