@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.8";
+const VERSION = "4.0.10";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -372,15 +372,20 @@ async function performAutoLogin(
         } catch (_) {
           break;
         }
-        if (urlAtual.includes("eproc") && !urlAtual.includes("sso")) break;
 
+        // A tela de "Seleção de perfil" é identificável por duas formas:
+        // pelo texto visível OU pela URL específica que ela usa
+        // (acao=entrar_sso, confirmado por captura de tela real). Checar as
+        // duas dá mais chance de detectar mesmo se uma delas falhar.
         if (!perfilEscolhido) {
           try {
-            const temSelecaoPerfil = await page
-              .locator("text=/Sele[çc][ãa]o de perfil/i")
-              .first()
-              .isVisible({ timeout: 500 });
-            if (temSelecaoPerfil) {
+            const pareceSelecaoPerfil =
+              urlAtual.includes("acao=entrar_sso") ||
+              (await page
+                .locator("text=/Sele[çc][ãa]o de perfil/i")
+                .first()
+                .isVisible({ timeout: 500 }));
+            if (pareceSelecaoPerfil) {
               // Preferência: o perfil "Chefe de Cartório" (função configurada
               // para esta automação). Se não existir, usa a primeira opção
               // disponível na lista — mantém o programa útil para outras
@@ -393,24 +398,70 @@ async function performAutoLogin(
                   )
                   .first();
               }
-              const textoOpcao = ((await opcao.textContent()) || "").trim();
-              log(
-                "info",
-                `Tela de seleção de perfil detectada. Selecionando: "${textoOpcao || "primeira opção"}"...`,
-              );
-              await opcao.click();
-              perfilEscolhido = true;
-              await page.waitForTimeout(1500);
-              continue;
+              if (await opcao.count()) {
+                const textoOpcao = ((await opcao.textContent()) || "").trim();
+                log(
+                  "info",
+                  `Tela de seleção de perfil detectada. Selecionando: "${textoOpcao || "primeira opção"}"...`,
+                );
+                await opcao.click();
+                perfilEscolhido = true;
+                await page.waitForTimeout(2000);
+                continue;
+              }
             }
           } catch (_) {}
         }
+
+        if (urlAtual.includes("eproc") && !urlAtual.includes("sso")) {
+          // Confirma mais uma vez que a tela de seleção não está mais visível
+          // antes de encerrar — o clique acima pode levar um instante a
+          // efetivar a navegação para a URL final.
+          let aindaNaSelecao = urlAtual.includes("acao=entrar_sso");
+          if (!aindaNaSelecao) {
+            try {
+              aindaNaSelecao = await page
+                .locator("text=/Sele[çc][ãa]o de perfil/i")
+                .first()
+                .isVisible({ timeout: 300 });
+            } catch (_) {}
+          }
+          if (!aindaNaSelecao) break;
+        }
+
         await page.waitForTimeout(500);
       }
       await page.waitForTimeout(1000);
 
       const finalUrl = page.url();
       log("info", `URL final: ${finalUrl}`);
+
+      // NUNCA declarar sucesso se ainda estivermos na tela de seleção de
+      // perfil — isso já aconteceu (URL final = "...acao=entrar_sso") e o
+      // programa relatou "sucesso" por engano, seguindo em frente sem
+      // realmente ter acesso ao eproc. Preferível falhar de forma visível.
+      let aindaNaSelecaoFinal = finalUrl.includes("acao=entrar_sso");
+      if (!aindaNaSelecaoFinal) {
+        try {
+          aindaNaSelecaoFinal = await page
+            .locator("text=/Sele[çc][ãa]o de perfil/i")
+            .first()
+            .isVisible({ timeout: 1000 });
+        } catch (_) {}
+      }
+      if (aindaNaSelecaoFinal) {
+        await captureLoginFailure(
+          page,
+          "preso_na_selecao_de_perfil",
+          screenshotDir,
+          log,
+        );
+        return {
+          ok: false,
+          error:
+            "O login entrou, mas o programa não conseguiu passar da tela de seleção de perfil (Chefe de Cartório / Servidor Unidade Judicial). Veja a captura de tela salva no Diagnóstico.",
+        };
+      }
 
       if (
         finalUrl.includes("sso.tjsp.jus.br") ||
