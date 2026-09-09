@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.10";
+const VERSION = "4.0.11";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -386,11 +386,19 @@ async function performAutoLogin(
                 .first()
                 .isVisible({ timeout: 500 }));
             if (pareceSelecaoPerfil) {
-              // Preferência: o perfil "Chefe de Cartório" (função configurada
-              // para esta automação). Se não existir, usa a primeira opção
-              // disponível na lista — mantém o programa útil para outras
-              // lotações/perfis no futuro.
-              let opcao = page.locator("text=/CHEFE DE CART[ÓO]RIO/i").first();
+              const urlAntes = urlAtual;
+
+              // Estratégia 1: clicar na LINHA (não só no texto) do perfil
+              // "Chefe de Cartório" — clicar na linha inteira tem mais chance
+              // de acionar o evento de seleção do que clicar só no texto.
+              let opcao = page
+                .locator(
+                  "tr:has-text('CHEFE DE CARTÓRIO'), a:has-text('CHEFE DE CARTÓRIO')",
+                )
+                .first();
+              if (!(await opcao.count())) {
+                opcao = page.locator("text=/CHEFE DE CART[ÓO]RIO/i").first();
+              }
               if (!(await opcao.count())) {
                 opcao = page
                   .locator(
@@ -405,10 +413,34 @@ async function performAutoLogin(
                   `Tela de seleção de perfil detectada. Selecionando: "${textoOpcao || "primeira opção"}"...`,
                 );
                 await opcao.click();
-                perfilEscolhido = true;
                 await page.waitForTimeout(2000);
-                continue;
               }
+
+              // Estratégia 2 (reforço): se a página ainda não mudou, tenta o
+              // link "Definir usuário padrão" — foi o que efetivamente
+              // funcionou quando testado manualmente uma vez.
+              let urlDepois = "";
+              try {
+                urlDepois = page.url();
+              } catch (_) {}
+              if (!urlDepois || urlDepois.includes("acao=entrar_sso")) {
+                try {
+                  const padrao = page
+                    .locator("text=/Definir usu[áa]rio padr[ãa]o/i")
+                    .first();
+                  if (await padrao.count()) {
+                    log(
+                      "info",
+                      'Ainda na tela de seleção — tentando "Definir usuário padrão"...',
+                    );
+                    await padrao.click();
+                    await page.waitForTimeout(2000);
+                  }
+                } catch (_) {}
+              }
+
+              perfilEscolhido = true;
+              continue;
             }
           } catch (_) {}
         }
