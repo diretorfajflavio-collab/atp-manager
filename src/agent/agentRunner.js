@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.11";
+const VERSION = "4.0.12";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -361,10 +361,14 @@ async function performAutoLogin(
       // Aguardar redirecionamento de volta ao eproc — e lidar com a tela de
       // "Seleção de perfil" (aparece para usuários com mais de uma
       // lotação/perfil, como Chefe de Cartório e Servidor Unidade Judicial).
-      // Sem isso, o programa ficava esperando 30s "à toa" nessa tela.
+      // Sem isso, o programa ficava esperando "à toa" nessa tela.
       log("info", "Aguardando redirecionamento após login...");
-      const limiteRedirect = Date.now() + 60000;
-      let perfilEscolhido = false;
+      const limiteRedirect = Date.now() + 90000;
+      let ultimaTentativaPerfil = 0; // timestamp da última vez que tentamos
+      let ultimoLogProgresso = 0;
+      const INTERVALO_TENTATIVA = 6000; // tenta de novo a cada 6s, se preciso
+      const INTERVALO_LOG = 10000; // registra o progresso a cada 10s
+
       while (Date.now() < limiteRedirect) {
         let urlAtual = "";
         try {
@@ -373,11 +377,21 @@ async function performAutoLogin(
           break;
         }
 
+        // Log periódico de progresso — mesmo sem nada "acontecer", isso
+        // garante que o histórico mostre o que estava havendo a cada
+        // instante, em vez de um silêncio longo e sem pistas em caso de
+        // falha.
+        if (Date.now() - ultimoLogProgresso > INTERVALO_LOG) {
+          log("info", `Ainda aguardando... URL atual: ${urlAtual}`);
+          ultimoLogProgresso = Date.now();
+        }
+
         // A tela de "Seleção de perfil" é identificável por duas formas:
         // pelo texto visível OU pela URL específica que ela usa
-        // (acao=entrar_sso, confirmado por captura de tela real). Checar as
-        // duas dá mais chance de detectar mesmo se uma delas falhar.
-        if (!perfilEscolhido) {
+        // (acao=entrar_sso, confirmado por captura de tela real).
+        const podeTentarPerfil =
+          Date.now() - ultimaTentativaPerfil > INTERVALO_TENTATIVA;
+        if (podeTentarPerfil) {
           try {
             const pareceSelecaoPerfil =
               urlAtual.includes("acao=entrar_sso") ||
@@ -386,7 +400,7 @@ async function performAutoLogin(
                 .first()
                 .isVisible({ timeout: 500 }));
             if (pareceSelecaoPerfil) {
-              const urlAntes = urlAtual;
+              ultimaTentativaPerfil = Date.now();
 
               // Estratégia 1: clicar na LINHA (não só no texto) do perfil
               // "Chefe de Cartório" — clicar na linha inteira tem mais chance
@@ -414,6 +428,11 @@ async function performAutoLogin(
                 );
                 await opcao.click();
                 await page.waitForTimeout(2000);
+              } else {
+                log(
+                  "info",
+                  "Tela de seleção de perfil detectada, mas nenhuma opção clicável foi localizada.",
+                );
               }
 
               // Estratégia 2 (reforço): se a página ainda não mudou, tenta o
@@ -435,14 +454,23 @@ async function performAutoLogin(
                     );
                     await padrao.click();
                     await page.waitForTimeout(2000);
+                  } else {
+                    log(
+                      "info",
+                      'Link "Definir usuário padrão" não encontrado nesta tentativa.',
+                    );
                   }
                 } catch (_) {}
               }
 
-              perfilEscolhido = true;
               continue;
             }
-          } catch (_) {}
+          } catch (err) {
+            log(
+              "warn",
+              `Verificação da tela de seleção de perfil falhou: ${err.message}`,
+            );
+          }
         }
 
         if (urlAtual.includes("eproc") && !urlAtual.includes("sso")) {
