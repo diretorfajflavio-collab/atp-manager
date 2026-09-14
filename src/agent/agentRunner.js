@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.12";
+const VERSION = "4.0.14";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -110,6 +110,29 @@ async function passwordLocator(page) {
   const byName = page.locator("input[name='password']");
   if (await byName.count()) return byName.first();
   return page.locator("input[type='password']").first();
+}
+
+// ── Detectar se um clique abriu uma nova aba/janela (pop-up) ────────────────
+// Sistemas antigos como o eproc às vezes abrem a ação em uma nova aba,
+// deixando a original parada. Se isso acontecer, o programa precisa passar
+// a usar a aba nova — senão fica "olhando" para a aba errada indefinidamente.
+async function verificarNovaAba(paginaAtual, log) {
+  try {
+    const paginas = paginaAtual.context().pages();
+    if (paginas.length > 1) {
+      const maisRecente = paginas[paginas.length - 1];
+      if (maisRecente !== paginaAtual) {
+        log(
+          "info",
+          `Uma nova aba/janela foi aberta (total de ${paginas.length}). Passando a usar a mais recente...`,
+        );
+        await maisRecente.bringToFront();
+        await maisRecente.waitForTimeout(500);
+        return maisRecente;
+      }
+    }
+  } catch (_) {}
+  return null;
 }
 
 // ── Captura de tela quando o login falha ─────────────────────────────────
@@ -365,6 +388,7 @@ async function performAutoLogin(
       log("info", "Aguardando redirecionamento após login...");
       const limiteRedirect = Date.now() + 90000;
       let ultimaTentativaPerfil = 0; // timestamp da última vez que tentamos
+      let raioXFeito = false; // só lista os elementos da tela uma vez
       let ultimoLogProgresso = 0;
       const INTERVALO_TENTATIVA = 6000; // tenta de novo a cada 6s, se preciso
       const INTERVALO_LOG = 10000; // registra o progresso a cada 10s
@@ -402,6 +426,42 @@ async function performAutoLogin(
             if (pareceSelecaoPerfil) {
               ultimaTentativaPerfil = Date.now();
 
+              // "Raio-X" da tela: em vez de continuar adivinhando o seletor
+              // certo, listamos os elementos clicáveis reais desta tela uma
+              // única vez — isso mostra exatamente como "CHEFE DE CARTÓRIO"
+              // e "Definir usuário padrão" estão implementados (link, linha
+              // de tabela, com que atributo de ação), em vez de suposição.
+              if (!raioXFeito) {
+                raioXFeito = true;
+                try {
+                  const elementos = await page.evaluate(() => {
+                    const sel =
+                      "a, button, tr, [onclick], [role='button'], input[type='button'], input[type='submit']";
+                    return Array.from(document.querySelectorAll(sel))
+                      .filter((el) => (el.textContent || "").trim().length > 0)
+                      .slice(0, 25)
+                      .map((el) => ({
+                        tag: el.tagName,
+                        texto: (el.textContent || "").trim().slice(0, 50),
+                        onclick: (el.getAttribute("onclick") || "").slice(
+                          0,
+                          80,
+                        ),
+                        href: (el.getAttribute("href") || "").slice(0, 80),
+                      }));
+                  });
+                  log(
+                    "info",
+                    `Raio-X da tela de seleção — elementos clicáveis encontrados: ${JSON.stringify(elementos)}`,
+                  );
+                } catch (err) {
+                  log(
+                    "warn",
+                    `Não foi possível fazer o raio-X da tela: ${err.message}`,
+                  );
+                }
+              }
+
               // Estratégia 1: clicar na LINHA (não só no texto) do perfil
               // "Chefe de Cartório" — clicar na linha inteira tem mais chance
               // de acionar o evento de seleção do que clicar só no texto.
@@ -428,6 +488,8 @@ async function performAutoLogin(
                 );
                 await opcao.click();
                 await page.waitForTimeout(2000);
+                const novaAba1 = await verificarNovaAba(page, log);
+                if (novaAba1) page = novaAba1;
               } else {
                 log(
                   "info",
@@ -454,6 +516,8 @@ async function performAutoLogin(
                     );
                     await padrao.click();
                     await page.waitForTimeout(2000);
+                    const novaAba2 = await verificarNovaAba(page, log);
+                    if (novaAba2) page = novaAba2;
                   } else {
                     log(
                       "info",
@@ -555,10 +619,10 @@ async function performAutoLogin(
       }
 
       log("info", "Login automático realizado com sucesso!");
-      return { ok: true };
+      return { ok: true, page };
     } else if (currentUrl.includes("eproc") && !currentUrl.includes("sso")) {
       log("info", "Sessão já ativa, login não foi necessário.");
-      return { ok: true };
+      return { ok: true, page };
     }
     await captureLoginFailure(page, "url_inesperada", screenshotDir, log);
     return { ok: false, error: `URL inesperada após navegação: ${currentUrl}` };
@@ -615,7 +679,7 @@ async function openAndEnsureSession(cfg, log) {
       } catch (_) {}
     },
   };
-  const page = context.pages()[0] || (await context.newPage());
+  let page = context.pages()[0] || (await context.newPage());
 
   log("info", `Navegando para ${eprocUrl}...`);
   // Rede de tribunal pode oscilar — tentamos até 3 vezes com espera crescente.
@@ -664,6 +728,7 @@ async function openAndEnsureSession(cfg, log) {
         log,
         cfg.screenshotDir || null,
       );
+      if (res.page) page = res.page;
       if (!res.ok) {
         await browser.close();
         return {
