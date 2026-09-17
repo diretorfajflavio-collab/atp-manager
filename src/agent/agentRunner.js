@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.14";
+const VERSION = "4.0.15";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -427,33 +427,66 @@ async function performAutoLogin(
               ultimaTentativaPerfil = Date.now();
 
               // "Raio-X" da tela: em vez de continuar adivinhando o seletor
-              // certo, listamos os elementos clicáveis reais desta tela uma
-              // única vez — isso mostra exatamente como "CHEFE DE CARTÓRIO"
-              // e "Definir usuário padrão" estão implementados (link, linha
-              // de tabela, com que atributo de ação), em vez de suposição.
+              // certo, mostramos a CADEIA DE ELEMENTOS-PAI a partir do texto
+              // "CHEFE DE CARTÓRIO" e "Definir usuário padrão" — isso revela
+              // se o clique de verdade precisa ser em um nível acima do
+              // texto (ex.: o <tr> ou <div> que envolve o texto, e não o
+              // texto em si). Repete até conseguir capturar algo real (a
+              // primeira checagem pode acontecer antes da página terminar
+              // de carregar).
+              // Usamos "." como curinga no lugar de acentos, para não
+              // depender da preservação exata de caracteres especiais ao
+              // transferir o arquivo.
               if (!raioXFeito) {
-                raioXFeito = true;
                 try {
-                  const elementos = await page.evaluate(() => {
-                    const sel =
-                      "a, button, tr, [onclick], [role='button'], input[type='button'], input[type='submit']";
-                    return Array.from(document.querySelectorAll(sel))
-                      .filter((el) => (el.textContent || "").trim().length > 0)
-                      .slice(0, 25)
-                      .map((el) => ({
-                        tag: el.tagName,
-                        texto: (el.textContent || "").trim().slice(0, 50),
-                        onclick: (el.getAttribute("onclick") || "").slice(
-                          0,
-                          80,
-                        ),
-                        href: (el.getAttribute("href") || "").slice(0, 80),
-                      }));
+                  const raioX = await page.evaluate(() => {
+                    function coletarCadeia(padraoTexto) {
+                      const regex = new RegExp(padraoTexto, "i");
+                      const todos = Array.from(
+                        document.querySelectorAll("body *"),
+                      );
+                      const alvo = todos.find(
+                        (el) =>
+                          el.children.length === 0 &&
+                          regex.test((el.textContent || "").trim()),
+                      );
+                      if (!alvo) return null;
+                      const cadeia = [];
+                      let el = alvo;
+                      for (let i = 0; i < 5 && el; i++) {
+                        cadeia.push({
+                          tag: el.tagName,
+                          classe: (el.className || "").toString().slice(0, 60),
+                          onclick:
+                            (el.getAttribute && el.getAttribute("onclick")) ||
+                            "",
+                          href:
+                            (el.getAttribute && el.getAttribute("href")) || "",
+                          texto: (el.textContent || "").trim().slice(0, 50),
+                        });
+                        el = el.parentElement;
+                      }
+                      return cadeia;
+                    }
+                    return {
+                      chefeCartorio: coletarCadeia("CHEFE DE CART.RIO"),
+                      definirPadrao: coletarCadeia("Definir usu.rio padr.o"),
+                    };
                   });
-                  log(
-                    "info",
-                    `Raio-X da tela de seleção — elementos clicáveis encontrados: ${JSON.stringify(elementos)}`,
-                  );
+                  if (
+                    (raioX.chefeCartorio && raioX.chefeCartorio.length) ||
+                    (raioX.definirPadrao && raioX.definirPadrao.length)
+                  ) {
+                    raioXFeito = true; // só marca como feito com dados reais
+                    log(
+                      "info",
+                      `Raio-X — cadeia até "CHEFE DE CARTÓRIO": ${JSON.stringify(raioX.chefeCartorio)}`,
+                    );
+                    log(
+                      "info",
+                      `Raio-X — cadeia até "Definir usuário padrão": ${JSON.stringify(raioX.definirPadrao)}`,
+                    );
+                  }
                 } catch (err) {
                   log(
                     "warn",
