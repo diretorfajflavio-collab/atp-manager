@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.15";
+const VERSION = "4.0.18";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -442,14 +442,33 @@ async function performAutoLogin(
                   const raioX = await page.evaluate(() => {
                     function coletarCadeia(padraoTexto) {
                       const regex = new RegExp(padraoTexto, "i");
+                      const ehCabecalho = (el) => {
+                        let cur = el;
+                        for (let i = 0; i < 6 && cur; i++) {
+                          const cls = (cur.className || "").toString();
+                          if (
+                            cls.includes("infraAreaDadosDinamica") ||
+                            cls.includes("font-weight-bold")
+                          )
+                            return true;
+                          cur = cur.parentElement;
+                        }
+                        return false;
+                      };
                       const todos = Array.from(
                         document.querySelectorAll("body *"),
                       );
-                      const alvo = todos.find(
+                      // Pega a ocorrência que NÃO é o cabeçalho (se existir);
+                      // se todas forem cabeçalho, mostra mesmo assim a
+                      // primeira, para não perder o dado.
+                      const candidatos = todos.filter(
                         (el) =>
                           el.children.length === 0 &&
                           regex.test((el.textContent || "").trim()),
                       );
+                      const alvo =
+                        candidatos.find((el) => !ehCabecalho(el)) ||
+                        candidatos[0];
                       if (!alvo) return null;
                       const cadeia = [];
                       let el = alvo;
@@ -495,49 +514,100 @@ async function performAutoLogin(
                 }
               }
 
-              // Estratégia 1: clicar na LINHA (não só no texto) do perfil
-              // "Chefe de Cartório" — clicar na linha inteira tem mais chance
-              // de acionar o evento de seleção do que clicar só no texto.
-              let opcao = page
-                .locator(
-                  "tr:has-text('CHEFE DE CARTÓRIO'), a:has-text('CHEFE DE CARTÓRIO')",
-                )
-                .first();
-              if (!(await opcao.count())) {
-                opcao = page.locator("text=/CHEFE DE CART[ÓO]RIO/i").first();
-              }
-              if (!(await opcao.count())) {
-                opcao = page
-                  .locator(
-                    "table tr:not(:first-child) td, table tr:not(:first-child) a, .list-group-item, a[href*='usuario']",
-                  )
+              // Abordagem em duas fases, para cobrir os dois comportamentos
+              // possíveis sem depender de acertar qual é o certo de
+              // antemão:
+              //   Fase A — clique DIRETO em "CHEFE DE CARTÓRIO" (mais simples;
+              //   já é suficiente para entrar no eproc com esse perfil,
+              //   mesmo sem gravar como padrão permanente).
+              //   Fase B — só se a página não mudar: clicar em "Definir
+              //   usuário padrão" (que revela uma lista de opções) e então
+              //   clicar em "CHEFE DE CARTÓRIO" dentro dessa lista revelada.
+              //
+              // IMPORTANTE (confirmado pelo raio-X): a página tem DUAS
+              // ocorrências do texto "CHEFE DE CARTÓRIO" — uma no
+              // CABEÇALHO (M314434 / FLAVIO FERNANDES PACETTA / CHEFE DE
+              // CARTÓRIO, dentro de infraAreaDadosDinamica/font-weight-bold),
+              // que não é clicável, e outra na tabela de opções de verdade.
+              // Por isso localizamos e MARCAMOS via JavaScript o elemento
+              // certo (excluindo explicitamente o cabeçalho) antes de
+              // clicar, em vez de confiar em um seletor de texto genérico.
+              const tentarClicarChefe = async (rotulo) => {
+                const marcado = await page.evaluate(() => {
+                  const ehCabecalho = (el) => {
+                    let cur = el;
+                    for (let i = 0; i < 6 && cur; i++) {
+                      const cls = (cur.className || "").toString();
+                      if (
+                        cls.includes("infraAreaDadosDinamica") ||
+                        cls.includes("font-weight-bold")
+                      )
+                        return true;
+                      cur = cur.parentElement;
+                    }
+                    return false;
+                  };
+                  const todos = Array.from(document.querySelectorAll("body *"));
+                  const candidato = todos.find(
+                    (el) =>
+                      el.children.length === 0 &&
+                      /CHEFE DE CART.RIO/i.test(
+                        (el.textContent || "").trim(),
+                      ) &&
+                      !ehCabecalho(el),
+                  );
+                  if (!candidato) return false;
+                  // Sobe até achar um ancestral que pareça clicável (linha
+                  // de tabela, link, item de lista), até 5 níveis.
+                  let el = candidato;
+                  let alvo = candidato;
+                  for (let i = 0; i < 5 && el; i++) {
+                    const tag = el.tagName;
+                    if (
+                      tag === "TR" ||
+                      tag === "A" ||
+                      tag === "LI" ||
+                      el.getAttribute("role") === "button" ||
+                      el.onclick
+                    ) {
+                      alvo = el;
+                      break;
+                    }
+                    alvo = el;
+                    el = el.parentElement;
+                  }
+                  alvo.setAttribute("data-atp-alvo-perfil", "1");
+                  return true;
+                });
+                if (!marcado) return false;
+                const opcao = page
+                  .locator("[data-atp-alvo-perfil='1']")
                   .first();
-              }
-              if (await opcao.count()) {
+                if (!(await opcao.count())) return false;
                 const textoOpcao = ((await opcao.textContent()) || "").trim();
                 log(
                   "info",
-                  `Tela de seleção de perfil detectada. Selecionando: "${textoOpcao || "primeira opção"}"...`,
+                  `${rotulo}: "${textoOpcao || "CHEFE DE CARTÓRIO"}"...`,
                 );
                 await opcao.click();
                 await page.waitForTimeout(2000);
-                const novaAba1 = await verificarNovaAba(page, log);
-                if (novaAba1) page = novaAba1;
-              } else {
-                log(
-                  "info",
-                  "Tela de seleção de perfil detectada, mas nenhuma opção clicável foi localizada.",
-                );
-              }
+                const novaAba = await verificarNovaAba(page, log);
+                if (novaAba) page = novaAba;
+                return true;
+              };
 
-              // Estratégia 2 (reforço): se a página ainda não mudou, tenta o
-              // link "Definir usuário padrão" — foi o que efetivamente
-              // funcionou quando testado manualmente uma vez.
-              let urlDepois = "";
+              // Fase A: clique direto, sem tocar em "Definir usuário padrão".
+              const tentouFaseA = await tentarClicarChefe(
+                'Clicando diretamente em "CHEFE DE CARTÓRIO"',
+              );
+
+              let urlAposFaseA = "";
               try {
-                urlDepois = page.url();
+                urlAposFaseA = page.url();
               } catch (_) {}
-              if (!urlDepois || urlDepois.includes("acao=entrar_sso")) {
+
+              // Fase B: só roda se ainda estivermos na tela de seleção.
+              if (!urlAposFaseA || urlAposFaseA.includes("acao=entrar_sso")) {
                 try {
                   const padrao = page
                     .locator("text=/Definir usu[áa]rio padr[ãa]o/i")
@@ -545,16 +615,17 @@ async function performAutoLogin(
                   if (await padrao.count()) {
                     log(
                       "info",
-                      'Ainda na tela de seleção — tentando "Definir usuário padrão"...',
+                      'Ainda na tela de seleção — clicando em "Definir usuário padrão" para revelar a lista...',
                     );
                     await padrao.click();
-                    await page.waitForTimeout(2000);
-                    const novaAba2 = await verificarNovaAba(page, log);
-                    if (novaAba2) page = novaAba2;
-                  } else {
+                    await page.waitForTimeout(1500);
+                    const novaAba = await verificarNovaAba(page, log);
+                    if (novaAba) page = novaAba;
+                    await tentarClicarChefe("Selecionando na lista revelada");
+                  } else if (!tentouFaseA) {
                     log(
                       "info",
-                      'Link "Definir usuário padrão" não encontrado nesta tentativa.',
+                      "Nenhuma opção de perfil clicável foi localizada nesta tentativa.",
                     );
                   }
                 } catch (_) {}
