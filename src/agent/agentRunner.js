@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.18";
+const VERSION = "4.0.19";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -389,6 +389,7 @@ async function performAutoLogin(
       const limiteRedirect = Date.now() + 90000;
       let ultimaTentativaPerfil = 0; // timestamp da última vez que tentamos
       let raioXFeito = false; // só lista os elementos da tela uma vez
+      let htmlDumpFeito = false; // salva o HTML completo da tela uma vez
       let ultimoLogProgresso = 0;
       const INTERVALO_TENTATIVA = 6000; // tenta de novo a cada 6s, se preciso
       const INTERVALO_LOG = 10000; // registra o progresso a cada 10s
@@ -466,10 +467,16 @@ async function performAutoLogin(
                           el.children.length === 0 &&
                           regex.test((el.textContent || "").trim()),
                       );
-                      const alvo =
-                        candidatos.find((el) => !ehCabecalho(el)) ||
-                        candidatos[0];
-                      if (!alvo) return null;
+                      const naoCabecalho = candidatos.find(
+                        (el) => !ehCabecalho(el),
+                      );
+                      const alvo = naoCabecalho || candidatos[0];
+                      if (!alvo)
+                        return {
+                          cadeia: null,
+                          foiCabecalho: false,
+                          totalOcorrencias: 0,
+                        };
                       const cadeia = [];
                       let el = alvo;
                       for (let i = 0; i < 5 && el; i++) {
@@ -485,18 +492,28 @@ async function performAutoLogin(
                         });
                         el = el.parentElement;
                       }
-                      return cadeia;
+                      return {
+                        cadeia,
+                        foiCabecalho: !naoCabecalho,
+                        totalOcorrencias: candidatos.length,
+                      };
                     }
                     return {
                       chefeCartorio: coletarCadeia("CHEFE DE CART.RIO"),
                       definirPadrao: coletarCadeia("Definir usu.rio padr.o"),
                     };
                   });
+                  // Só marca como "feito" quando encontrar uma ocorrência que
+                  // NÃO é o cabeçalho — senão, continua tentando nas próximas
+                  // voltas, já que o conteúdo real pode ainda não ter
+                  // aparecido.
+                  if (!raioX.chefeCartorio.foiCabecalho) {
+                    raioXFeito = true;
+                  }
                   if (
-                    (raioX.chefeCartorio && raioX.chefeCartorio.length) ||
-                    (raioX.definirPadrao && raioX.definirPadrao.length)
+                    raioX.chefeCartorio.cadeia ||
+                    raioX.definirPadrao.cadeia
                   ) {
-                    raioXFeito = true; // só marca como feito com dados reais
                     log(
                       "info",
                       `Raio-X — cadeia até "CHEFE DE CARTÓRIO": ${JSON.stringify(raioX.chefeCartorio)}`,
@@ -621,7 +638,45 @@ async function performAutoLogin(
                     await page.waitForTimeout(1500);
                     const novaAba = await verificarNovaAba(page, log);
                     if (novaAba) page = novaAba;
-                    await tentarClicarChefe("Selecionando na lista revelada");
+
+                    // Salva o HTML completo da tela, uma única vez, logo
+                    // após "revelar a lista" — se a busca por texto continuar
+                    // não encontrando a opção certa, o HTML real (sem
+                    // depender de suposição sobre a estrutura) mostra
+                    // exatamente como a tela é montada.
+                    if (!htmlDumpFeito && screenshotDir) {
+                      htmlDumpFeito = true;
+                      try {
+                        const fs = require("fs");
+                        const path = require("path");
+                        fs.mkdirSync(screenshotDir, { recursive: true });
+                        const arquivoHtml = path.join(
+                          screenshotDir,
+                          "pagina_selecao_perfil.html",
+                        );
+                        const html = await page.content();
+                        fs.writeFileSync(arquivoHtml, html, "utf8");
+                        log(
+                          "info",
+                          `HTML completo da tela salvo para análise: ${arquivoHtml}`,
+                        );
+                      } catch (err) {
+                        log(
+                          "warn",
+                          `Não foi possível salvar o HTML da tela: ${err.message}`,
+                        );
+                      }
+                    }
+
+                    const cliqueFaseB = await tentarClicarChefe(
+                      "Selecionando na lista revelada",
+                    );
+                    if (!cliqueFaseB) {
+                      log(
+                        "info",
+                        'Após "Definir usuário padrão", ainda não encontrei "CHEFE DE CARTÓRIO" clicável.',
+                      );
+                    }
                   } else if (!tentouFaseA) {
                     log(
                       "info",
