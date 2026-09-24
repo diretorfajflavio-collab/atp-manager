@@ -13,7 +13,7 @@
  *   - Comunicação REST com o painel (endpoints /api/agent/*)
  */
 
-const VERSION = "4.0.19";
+const VERSION = "4.0.20";
 
 // ── Constantes ─────────────────────────────────────────────────────────────
 const TJSP_DOMAINS = ["tjsp", "jus.br", "eproc"];
@@ -388,8 +388,6 @@ async function performAutoLogin(
       log("info", "Aguardando redirecionamento após login...");
       const limiteRedirect = Date.now() + 90000;
       let ultimaTentativaPerfil = 0; // timestamp da última vez que tentamos
-      let raioXFeito = false; // só lista os elementos da tela uma vez
-      let htmlDumpFeito = false; // salva o HTML completo da tela uma vez
       let ultimoLogProgresso = 0;
       const INTERVALO_TENTATIVA = 6000; // tenta de novo a cada 6s, se preciso
       const INTERVALO_LOG = 10000; // registra o progresso a cada 10s
@@ -427,263 +425,37 @@ async function performAutoLogin(
             if (pareceSelecaoPerfil) {
               ultimaTentativaPerfil = Date.now();
 
-              // "Raio-X" da tela: em vez de continuar adivinhando o seletor
-              // certo, mostramos a CADEIA DE ELEMENTOS-PAI a partir do texto
-              // "CHEFE DE CARTÓRIO" e "Definir usuário padrão" — isso revela
-              // se o clique de verdade precisa ser em um nível acima do
-              // texto (ex.: o <tr> ou <div> que envolve o texto, e não o
-              // texto em si). Repete até conseguir capturar algo real (a
-              // primeira checagem pode acontecer antes da página terminar
-              // de carregar).
-              // Usamos "." como curinga no lugar de acentos, para não
-              // depender da preservação exata de caracteres especiais ao
-              // transferir o arquivo.
-              if (!raioXFeito) {
-                try {
-                  const raioX = await page.evaluate(() => {
-                    function coletarCadeia(padraoTexto) {
-                      const regex = new RegExp(padraoTexto, "i");
-                      const ehCabecalho = (el) => {
-                        let cur = el;
-                        for (let i = 0; i < 6 && cur; i++) {
-                          const cls = (cur.className || "").toString();
-                          if (
-                            cls.includes("infraAreaDadosDinamica") ||
-                            cls.includes("font-weight-bold")
-                          )
-                            return true;
-                          cur = cur.parentElement;
-                        }
-                        return false;
-                      };
-                      const todos = Array.from(
-                        document.querySelectorAll("body *"),
-                      );
-                      // Pega a ocorrência que NÃO é o cabeçalho (se existir);
-                      // se todas forem cabeçalho, mostra mesmo assim a
-                      // primeira, para não perder o dado.
-                      const candidatos = todos.filter(
-                        (el) =>
-                          el.children.length === 0 &&
-                          regex.test((el.textContent || "").trim()),
-                      );
-                      const naoCabecalho = candidatos.find(
-                        (el) => !ehCabecalho(el),
-                      );
-                      const alvo = naoCabecalho || candidatos[0];
-                      if (!alvo)
-                        return {
-                          cadeia: null,
-                          foiCabecalho: false,
-                          totalOcorrencias: 0,
-                        };
-                      const cadeia = [];
-                      let el = alvo;
-                      for (let i = 0; i < 5 && el; i++) {
-                        cadeia.push({
-                          tag: el.tagName,
-                          classe: (el.className || "").toString().slice(0, 60),
-                          onclick:
-                            (el.getAttribute && el.getAttribute("onclick")) ||
-                            "",
-                          href:
-                            (el.getAttribute && el.getAttribute("href")) || "",
-                          texto: (el.textContent || "").trim().slice(0, 50),
-                        });
-                        el = el.parentElement;
-                      }
-                      return {
-                        cadeia,
-                        foiCabecalho: !naoCabecalho,
-                        totalOcorrencias: candidatos.length,
-                      };
-                    }
-                    return {
-                      chefeCartorio: coletarCadeia("CHEFE DE CART.RIO"),
-                      definirPadrao: coletarCadeia("Definir usu.rio padr.o"),
-                    };
-                  });
-                  // Só marca como "feito" quando encontrar uma ocorrência que
-                  // NÃO é o cabeçalho — senão, continua tentando nas próximas
-                  // voltas, já que o conteúdo real pode ainda não ter
-                  // aparecido.
-                  if (!raioX.chefeCartorio.foiCabecalho) {
-                    raioXFeito = true;
-                  }
-                  if (
-                    raioX.chefeCartorio.cadeia ||
-                    raioX.definirPadrao.cadeia
-                  ) {
-                    log(
-                      "info",
-                      `Raio-X — cadeia até "CHEFE DE CARTÓRIO": ${JSON.stringify(raioX.chefeCartorio)}`,
-                    );
-                    log(
-                      "info",
-                      `Raio-X — cadeia até "Definir usuário padrão": ${JSON.stringify(raioX.definirPadrao)}`,
-                    );
-                  }
-                } catch (err) {
-                  log(
-                    "warn",
-                    `Não foi possível fazer o raio-X da tela: ${err.message}`,
-                  );
-                }
-              }
-
-              // Abordagem em duas fases, para cobrir os dois comportamentos
-              // possíveis sem depender de acertar qual é o certo de
-              // antemão:
-              //   Fase A — clique DIRETO em "CHEFE DE CARTÓRIO" (mais simples;
-              //   já é suficiente para entrar no eproc com esse perfil,
-              //   mesmo sem gravar como padrão permanente).
-              //   Fase B — só se a página não mudar: clicar em "Definir
-              //   usuário padrão" (que revela uma lista de opções) e então
-              //   clicar em "CHEFE DE CARTÓRIO" dentro dessa lista revelada.
-              //
-              // IMPORTANTE (confirmado pelo raio-X): a página tem DUAS
-              // ocorrências do texto "CHEFE DE CARTÓRIO" — uma no
-              // CABEÇALHO (M314434 / FLAVIO FERNANDES PACETTA / CHEFE DE
-              // CARTÓRIO, dentro de infraAreaDadosDinamica/font-weight-bold),
-              // que não é clicável, e outra na tabela de opções de verdade.
-              // Por isso localizamos e MARCAMOS via JavaScript o elemento
-              // certo (excluindo explicitamente o cabeçalho) antes de
-              // clicar, em vez de confiar em um seletor de texto genérico.
-              const tentarClicarChefe = async (rotulo) => {
-                const marcado = await page.evaluate(() => {
-                  const ehCabecalho = (el) => {
-                    let cur = el;
-                    for (let i = 0; i < 6 && cur; i++) {
-                      const cls = (cur.className || "").toString();
-                      if (
-                        cls.includes("infraAreaDadosDinamica") ||
-                        cls.includes("font-weight-bold")
-                      )
-                        return true;
-                      cur = cur.parentElement;
-                    }
-                    return false;
-                  };
-                  const todos = Array.from(document.querySelectorAll("body *"));
-                  const candidato = todos.find(
-                    (el) =>
-                      el.children.length === 0 &&
-                      /CHEFE DE CART.RIO/i.test(
-                        (el.textContent || "").trim(),
-                      ) &&
-                      !ehCabecalho(el),
-                  );
-                  if (!candidato) return false;
-                  // Sobe até achar um ancestral que pareça clicável (linha
-                  // de tabela, link, item de lista), até 5 níveis.
-                  let el = candidato;
-                  let alvo = candidato;
-                  for (let i = 0; i < 5 && el; i++) {
-                    const tag = el.tagName;
-                    if (
-                      tag === "TR" ||
-                      tag === "A" ||
-                      tag === "LI" ||
-                      el.getAttribute("role") === "button" ||
-                      el.onclick
-                    ) {
-                      alvo = el;
-                      break;
-                    }
-                    alvo = el;
-                    el = el.parentElement;
-                  }
-                  alvo.setAttribute("data-atp-alvo-perfil", "1");
-                  return true;
-                });
-                if (!marcado) return false;
-                const opcao = page
-                  .locator("[data-atp-alvo-perfil='1']")
+              // Seletor DEFINITIVO, confirmado pelo HTML real da tela salva
+              // em diagnóstico: cada perfil é um <button> com o atributo
+              // data-descricao (ex.: "CHEFE DE CARTÓRIO / JGRJCC") e um
+              // onclick="acaoLogar(...)" que entra diretamente com aquele
+              // perfil — não é preciso passar por "Definir usuário padrão"
+              // para isso; essa outra opção só salva uma preferência para o
+              // futuro, sem efeito sobre a entrada de agora.
+              let opcao = page
+                .locator("button[data-descricao*='CHEFE DE CARTÓRIO']")
+                .first();
+              if (!(await opcao.count())) {
+                opcao = page
+                  .locator("button[onclick*='acaoLogar']", {
+                    hasText: /CHEFE DE CART[ÓO]RIO/i,
+                  })
                   .first();
-                if (!(await opcao.count())) return false;
-                const textoOpcao = ((await opcao.textContent()) || "").trim();
+              }
+              if (await opcao.count()) {
                 log(
                   "info",
-                  `${rotulo}: "${textoOpcao || "CHEFE DE CARTÓRIO"}"...`,
+                  'Tela de seleção de perfil detectada. Clicando no perfil "CHEFE DE CARTÓRIO"...',
                 );
                 await opcao.click();
                 await page.waitForTimeout(2000);
                 const novaAba = await verificarNovaAba(page, log);
                 if (novaAba) page = novaAba;
-                return true;
-              };
-
-              // Fase A: clique direto, sem tocar em "Definir usuário padrão".
-              const tentouFaseA = await tentarClicarChefe(
-                'Clicando diretamente em "CHEFE DE CARTÓRIO"',
-              );
-
-              let urlAposFaseA = "";
-              try {
-                urlAposFaseA = page.url();
-              } catch (_) {}
-
-              // Fase B: só roda se ainda estivermos na tela de seleção.
-              if (!urlAposFaseA || urlAposFaseA.includes("acao=entrar_sso")) {
-                try {
-                  const padrao = page
-                    .locator("text=/Definir usu[áa]rio padr[ãa]o/i")
-                    .first();
-                  if (await padrao.count()) {
-                    log(
-                      "info",
-                      'Ainda na tela de seleção — clicando em "Definir usuário padrão" para revelar a lista...',
-                    );
-                    await padrao.click();
-                    await page.waitForTimeout(1500);
-                    const novaAba = await verificarNovaAba(page, log);
-                    if (novaAba) page = novaAba;
-
-                    // Salva o HTML completo da tela, uma única vez, logo
-                    // após "revelar a lista" — se a busca por texto continuar
-                    // não encontrando a opção certa, o HTML real (sem
-                    // depender de suposição sobre a estrutura) mostra
-                    // exatamente como a tela é montada.
-                    if (!htmlDumpFeito && screenshotDir) {
-                      htmlDumpFeito = true;
-                      try {
-                        const fs = require("fs");
-                        const path = require("path");
-                        fs.mkdirSync(screenshotDir, { recursive: true });
-                        const arquivoHtml = path.join(
-                          screenshotDir,
-                          "pagina_selecao_perfil.html",
-                        );
-                        const html = await page.content();
-                        fs.writeFileSync(arquivoHtml, html, "utf8");
-                        log(
-                          "info",
-                          `HTML completo da tela salvo para análise: ${arquivoHtml}`,
-                        );
-                      } catch (err) {
-                        log(
-                          "warn",
-                          `Não foi possível salvar o HTML da tela: ${err.message}`,
-                        );
-                      }
-                    }
-
-                    const cliqueFaseB = await tentarClicarChefe(
-                      "Selecionando na lista revelada",
-                    );
-                    if (!cliqueFaseB) {
-                      log(
-                        "info",
-                        'Após "Definir usuário padrão", ainda não encontrei "CHEFE DE CARTÓRIO" clicável.',
-                      );
-                    }
-                  } else if (!tentouFaseA) {
-                    log(
-                      "info",
-                      "Nenhuma opção de perfil clicável foi localizada nesta tentativa.",
-                    );
-                  }
-                } catch (_) {}
+              } else {
+                log(
+                  "info",
+                  'Tela de seleção de perfil detectada, mas o botão "CHEFE DE CARTÓRIO" não foi encontrado nesta tentativa.',
+                );
               }
 
               continue;
