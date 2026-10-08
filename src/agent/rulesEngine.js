@@ -459,15 +459,46 @@ async function executePjAutoraRule(
 }
 
 // ── Coletar processos do localizador PETIÇÃO INICIAL JEE (com paginação) ─────
+// ── Navegar com repetição ────────────────────────────────────────────────
+// O eproc às vezes demora mais que 30s para responder (mesmo já autenticado).
+// Antes, cada navegação desistia na primeira tentativa; agora repetimos até
+// 3 vezes com espera crescente antes de desistir de vez.
+async function gotoComRetentativa(page, url, log, label) {
+  const tentativas = 3;
+  for (let i = 1; i <= tentativas; i++) {
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+      return true;
+    } catch (err) {
+      const motivo = String(err.message || "").split("\n")[0];
+      if (i < tentativas) {
+        log(
+          "warn",
+          `Tentativa ${i}/${tentativas} de acessar ${label} não respondeu a tempo. Tentando novamente...`,
+        );
+        await page.waitForTimeout(2000 * i);
+      } else {
+        log(
+          "error",
+          `Não foi possível acessar ${label} após ${tentativas} tentativas (${motivo}).`,
+        );
+      }
+    }
+  }
+  return false;
+}
+
 async function collectPeticaoInicialProcessos(page, baseUrl, log, opts = {}) {
   const petitions = [];
   log("info", "Buscando processos no localizador 'PETIÇÃO INICIAL JEE'...");
   try {
     const painelUrl = `${baseUrl}/controlador.php?acao=painel_secretaria_listar&acao_origem=principal`;
-    await page.goto(painelUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
+    if (
+      !(await gotoComRetentativa(page, painelUrl, log, "painel da secretaria"))
+    ) {
+      await captureFailure(page, "timeout_painel", opts, log);
+      return petitions;
+    }
     await page.waitForTimeout(3000);
 
     // Localizar o link do localizador no painel
@@ -532,10 +563,17 @@ async function collectPeticaoInicialProcessos(page, baseUrl, log, opts = {}) {
     }
 
     log("info", `Localizador encontrado. Carregando lista...`);
-    await page.goto(locUrlDirect, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
+    if (
+      !(await gotoComRetentativa(
+        page,
+        locUrlDirect,
+        log,
+        "localizador PETIÇÃO INICIAL JEE",
+      ))
+    ) {
+      await captureFailure(page, "timeout_localizador", opts, log);
+      return petitions;
+    }
     await page.waitForTimeout(3000);
 
     try {
@@ -648,21 +686,48 @@ async function execute({
   }
 
   // Identificar se há regras PJ Autora
+  // Comparação tolerante a maiúsculas/espaços, para não depender de uma
+  // formatação exata vinda do painel.
+  const normalizarTipo = (t) =>
+    String(t || "")
+      .trim()
+      .toLowerCase();
   const pjAutoraRules = rules.filter((r) =>
-    (r.actions || []).some((a) => a.type === "pj_autora"),
+    (r.actions || []).some((a) => normalizarTipo(a.type) === "pj_autora"),
   );
+  if (!pjAutoraRules.length && rules.length) {
+    const tiposEncontrados = [
+      ...new Set(
+        rules.flatMap((r) =>
+          (r.actions || []).map((a) => a.type || "(sem tipo)"),
+        ),
+      ),
+    ];
+    log(
+      "info",
+      `Nenhuma ação do tipo "pj_autora" encontrada. Tipo(s) de ação recebido(s) do painel: ${tiposEncontrados.join(", ")}.`,
+    );
+  }
 
   let petitions = [];
   if (pjAutoraRules.length) {
+    log(
+      "info",
+      `${pjAutoraRules.length} regra(s) de PJ Autora encontrada(s) — usando o localizador PETIÇÃO INICIAL JEE.`,
+    );
     petitions = await collectPeticaoInicialProcessos(page, baseUrl, log, opts);
   } else {
     // Lógica legada: petições pendentes
+    log(
+      "info",
+      "Nenhuma regra de PJ Autora configurada — usando a lista de petições pendentes (menu padrão).",
+    );
     try {
       const petUrl = `${baseUrl}/externo_controlador.php?acao=peticao_listar&acao_origem=menu`;
-      await page.goto(petUrl, {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      });
+      if (!(await gotoComRetentativa(page, petUrl, log, "lista de petições"))) {
+        await captureFailure(page, "timeout_peticao_listar", opts, log);
+        throw new Error("Não foi possível carregar a lista de petições.");
+      }
       await page.waitForTimeout(2000);
       const rows = await page
         .locator("table.infraTable tbody tr, table[id*='peticao'] tbody tr")
@@ -722,7 +787,7 @@ async function execute({
       };
 
       for (const action of actions) {
-        const actionType = action.type || "";
+        const actionType = normalizarTipo(action.type);
         const params = action.params || {};
         try {
           if (actionType === "pj_autora") {
@@ -749,27 +814,26 @@ async function execute({
                 errorMessage: null,
               };
             }
-          } else if (actionType === "movimentar") {
-            const movimento = params.movimento || "";
-            const descricao = params.descricao || "Movimento automático";
+          } else if (
+            actionType === "movimentar" ||
+            actionType === "classificar_peticao" ||
+            actionType === "encaminhar_fluxo"
+          ) {
+            // ATENÇÃO: estes três tipos de ação ainda NÃO têm automação real
+            // implementada (são placeholders de uma fase inicial do
+            // projeto). Antes, eles devolviam uma mensagem de "sucesso"
+            // fingido mesmo sem fazer nada no eproc — o que poderia enganar
+            // o usuário, inclusive em modo de simulação. Agora reportam
+            // claramente que não estão prontos, e NUNCA fingem sucesso.
+            log(
+              "warn",
+              `O tipo de ação "${actionType}" ainda não tem automação real implementada — nenhuma alteração foi feita no eproc.`,
+            );
             actionResult = {
-              success: true,
-              actionTaken: `Movimento ${movimento}: ${descricao}`,
-              errorMessage: null,
-            };
-          } else if (actionType === "classificar_peticao") {
-            const usarIa = params.usar_ia === "true";
-            actionResult = {
-              success: true,
-              actionTaken: `Petição classificada${usarIa ? " com IA" : ""}`,
-              errorMessage: null,
-            };
-          } else if (actionType === "encaminhar_fluxo") {
-            const baseadoEm = params.baseado_em || "tipo_peticao";
-            actionResult = {
-              success: true,
-              actionTaken: `Fluxo encaminhado: ${baseadoEm}`,
-              errorMessage: null,
+              success: false,
+              actionTaken: `Tipo "${actionType}" reconhecido, mas ainda sem automação real implementada`,
+              errorMessage:
+                "Esta ação ainda não foi desenvolvida. Nenhuma alteração foi feita no eproc.",
             };
           } else {
             actionResult = {
